@@ -1,0 +1,16 @@
+# Filled in T20 with production-grade rules.
+# Placeholder entries to keep the Docker build context lean from day one.
+
+.git/
+.venv/
+outputs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+README.fa.md
+docs/
