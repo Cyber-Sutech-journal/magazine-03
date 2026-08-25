@@ -1,0 +1,44 @@
+# Lightweight config for GitHub Actions CI integration tests.
+# Uses yolo26n (smallest/fastest variant) to keep CI runtime low on GitHub-hosted runners.
+# All published evaluation results use configs/default.yaml (yolo26m), never this file.
+
+video:
+  path: "data/ci_sample_clip.mp4"
+  output_dir: "outputs/"
+
+detection:
+  model_variant: "yolo26n"
+  imgsz: 640
+  confidence_threshold: 0.4
+  classes: ["person", "car"]
+
+tracker:
+  type: "bytetrack"
+  track_thresh: 0.5
+  match_thresh: 0.8
+  track_buffer: 30
+
+lines:
+  - line_id: "main_line"
+    point_a: [100, 400]
+    point_b: [800, 400]
+    positive_direction: "A_to_B"
+
+crossing_logic:
+  reference_point: "bottom_center"
+  history_length: 8
+  confirmation_majority_threshold: 0.7
+  cooldown_seconds: 1.5
+  stale_track_timeout_seconds: 2.0
+  min_displacement_px: null
+  min_velocity_px_per_s: null
+
+events:
+  output_csv: "outputs/events.csv"
+
+evaluation:
+  matching_tolerance_seconds: 1.0
+
+visualization:
+  output_video: "outputs/annotated.mp4"
+  draw_trails: false
