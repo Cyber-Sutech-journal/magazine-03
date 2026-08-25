@@ -22,6 +22,7 @@ assignees: ''
 # Example — replace with the real interface for this task
 from mot_counting.interfaces.detector import IDetector
 
+
 class IDetector(ABC):
     @abstractmethod
     def predict(self, frame: np.ndarray) -> list[Detection]: ...
