@@ -51,7 +51,7 @@ The controller never imports concrete YOLO or ByteTrack classes.
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/Cyber-Sutech-journal/magazine-03
 cd projects/artificial-intelligence/src/mot_counting
 
 # Create and activate a virtual environment
