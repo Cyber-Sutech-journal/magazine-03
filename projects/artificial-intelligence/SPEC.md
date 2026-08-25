@@ -48,13 +48,7 @@ The system is designed as a clean, modular research codebase suitable for an aca
 | **Developer** | **Farzad** | Implementation and testing of assigned project modules |
 | **Developer** | **Amirmohammad** | Implementation and testing of assigned project modules |
 
-**Implementation team:** the coding work is done by three people — Mostafa, Farzad, and Amirmohammad. Armila supervises quality and owns the final evaluation but does not implement.
-
-**Work split:** Mostafa will personally implement roughly **60–70%** of the codebase (architecture, interfaces, Crossing Logic, integration). Farzad and Amirmohammad will each take on approximately **20%** of the project as clearly scoped, interface-bound tasks.
-
-**Deadline:** the project must be complete by **September 1, 2026** (~10 days from project kickoff). Given this timeline, Mostafa is using Cursor as an AI-assisted IDE to accelerate implementation.
-
-Armila performs the official evaluation. All developers must unit-test and integration-test their own modules before hand-off. Task breakdown for Farzad and Amirmohammad will be issued only after the core architecture and repository skeleton are finalized and pushed.
+**Deadline:** the project must be complete by **September 1, 2026** (~10 days from project kickoff).
 
 ---
 
