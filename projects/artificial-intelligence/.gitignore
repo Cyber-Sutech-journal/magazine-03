@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.pyo
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Project outputs (results are gitignored; only configs and code are versioned)
+outputs/
+
+# Model weight caches (downloaded/baked at build time; never committed)
+*.pt
+*.pth
+*.onnx
+*.engine
+~/.cache/ultralytics/
+.cache/
+
+# Data (only .gitkeep is committed; actual clips are large binaries)
+data/*
+!data/.gitkeep
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Ruff / linting cache
+.ruff_cache/
+
+# pytest cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy / type-check cache
+.mypy_cache/
+
+# pre-commit cache
+.pre-commit-cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment variables / secrets
+.env
+.env.*
