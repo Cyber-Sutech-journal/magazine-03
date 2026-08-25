@@ -448,7 +448,7 @@ All components communicate exclusively through `abc.ABC` interfaces. The Control
 ## 9. Repository Structure (Recommended Production Layout)
 
 ```
-cyber-sotak-mot-counting/
+artificial-intelligence/
 ├── README.md                  # English, primary documentation; includes third-party (AGPL-3.0) license note
 ├── README.fa.md               # Optional Persian summary for magazine readers
 ├── LICENSE                    # MIT (project code)
