@@ -168,3 +168,36 @@ independently comply with its AGPL-3.0 license (or obtain your own Ultralytics E
 License). This is independent of this project's MIT license.
 
 For the full AGPL-3.0 text, see: <https://www.gnu.org/licenses/agpl-3.0.html>
+
+## Ground Truth Annotation Tool
+Use `scripts/annotate_ground_truth.py` to create manual ground-truth
+annotations for video line-crossing events.
+
+### Usage
+```powershell
+python .\scripts\annotate_ground_truth.py `
+--video ".\path\to\clip.mp4" `
+--output ".\path\to\ground_truth.csv"
+
+### Keyboard controls
+| Key | Action |
+| --- | --- |
+| `Space` | Pause or resume video playback |
+| `Right Arrow` | Move one frame forward and pause |
+| `Left Arrow` | Move one frame backward and pause |
+| `M` | Mark a crossing on the currently displayed frame |
+| `U` | Remove the most recently added annotation |
+| `Q` or `Esc` | Save annotations and exit |
+
+When marking a crossing, the tool prompts for:
+- `class_name`
+- `direction` (`IN` or `OUT`)
+- `line_id`
+
+### Output CSV schema
+frame_idx,timestamp_seconds,class_name,direction,line_id,video_name
+
+
+- ` frame_idx` is zero-based.
+- ` timestamp_seconds` is calculated as `frame_idx / FPS`.
+-   Each marked crossing creates exactly one CSV row.
