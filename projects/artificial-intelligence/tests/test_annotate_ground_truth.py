@@ -7,6 +7,7 @@ import pytest
 
 from scripts.annotate_ground_truth import (
     CSV_FIELDNAMES,
+    DEFAULT_FALLBACK_FPS,
     KEY_LEFT_CODES,
     KEY_RIGHT_CODES,
     AnnotationEvent,
@@ -165,3 +166,11 @@ def test_normalize_key_case_insensitivity():
 
 def test_normalize_key_unhandled_code():
     assert normalize_key(999999) == 999999
+
+
+def test_fps_fallback_when_zero_or_negative():
+    """Verify that non-positive FPS falls back to DEFAULT_FALLBACK_FPS."""
+    raw_fps = 0.0
+    effective_fps = DEFAULT_FALLBACK_FPS if raw_fps is None or raw_fps <= 0 else raw_fps
+
+    assert effective_fps == 25.0

@@ -8,10 +8,17 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
+
+logger = logging.getLogger(__name__)
+
+# Fallback FPS based on T06 policy
+DEFAULT_FALLBACK_FPS = 25.0
+
 
 # Named constants for platform-dependent key codes returned by cv2.waitKeyEx
 KEY_LEFT_CODES = frozenset({2424832, 65361})
@@ -177,6 +184,15 @@ def run_annotation(
         raise RuntimeError(f"Could not open video: {video_path}")
 
     fps = float(capture.get(cv2.CAP_PROP_FPS))
+
+    if fps is None or fps <= 0 or not isinstance(fps, (int, float)):
+        logger.warning(
+            "Invalid or zero FPS (%s) reported by video container. Falling back to default: %.1f FPS",
+            fps,
+            DEFAULT_FALLBACK_FPS,
+        )
+        fps = DEFAULT_FALLBACK_FPS
+
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     video_name = video_path.name
     events: list[AnnotationEvent] = []
@@ -208,7 +224,7 @@ def run_annotation(
             )
             cv2.imshow(window_name, displayed)
 
-            delay = max(1, round(1000 / fps)) if playing and fps > 0 else 0
+            delay = max(1, round(1000 / fps)) if playing else 0
             key = cv2.waitKeyEx(delay)
 
             if key in (ord("q"), 27):
