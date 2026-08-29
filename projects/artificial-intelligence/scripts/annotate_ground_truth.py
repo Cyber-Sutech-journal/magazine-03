@@ -13,6 +13,26 @@ from pathlib import Path
 
 import cv2
 
+# Named constants for platform-dependent key codes returned by cv2.waitKeyEx
+KEY_LEFT_CODES = frozenset({2424832, 65361})
+KEY_RIGHT_CODES = frozenset({2555904, 65363})
+
+
+def normalize_key(key: int) -> str | int:
+    """Normalize a waitKeyEx key code for portable cross-platform matching.
+
+    Maps platform-specific arrow codes to semantic names ('left', 'right')
+    and lowercases ASCII characters so 'm'/'M', 'u'/'U', 'q'/'Q' behave identically.
+    """
+    if key in KEY_LEFT_CODES:
+        return "left"
+    if key in KEY_RIGHT_CODES:
+        return "right"
+    if 0 <= key < 256:
+        return chr(key).lower()
+    return key
+
+
 CSV_FIELDNAMES = [
     "frame_idx",
     "timestamp_seconds",
@@ -230,18 +250,40 @@ def run_annotation(
 
                 continue
 
-            if key in (81, 2424832, 65361):
+            key = cv2.waitKeyEx(delay)
+            if key == -1:
+                if playing:
+                    current_idx = min(max(total_frames - 1, 0), current_idx + 1)
+                continue
+
+            action = normalize_key(key)
+
+            if action == "left":
                 current_idx = max(0, current_idx - 1)
                 playing = False
                 continue
 
-            if key in (83, 2555904, 65363):
-                current_idx = min(
-                    max(total_frames - 1, 0),
-                    current_idx + 1,
-                )
+            if action == "right":
+                current_idx = min(max(total_frames - 1, 0), current_idx + 1)
                 playing = False
                 continue
+
+            if action == " ":
+                playing = not playing
+                continue
+
+            if action == "m":
+                ts = calculate_timestamp(current_idx, fps)
+                events.append(AnnotationEvent(frame_idx=current_idx, timestamp=ts, label="anomaly"))
+                continue
+
+            if action == "u":
+                if events:
+                    events.pop()
+                continue
+
+            if action in ("q", "\x1b"):
+                break
 
             if playing:
                 if current_idx >= max(total_frames - 1, 0):

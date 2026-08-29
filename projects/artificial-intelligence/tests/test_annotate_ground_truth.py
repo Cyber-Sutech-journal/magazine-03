@@ -7,8 +7,11 @@ import pytest
 
 from scripts.annotate_ground_truth import (
     CSV_FIELDNAMES,
+    KEY_LEFT_CODES,
+    KEY_RIGHT_CODES,
     AnnotationEvent,
     calculate_timestamp,
+    normalize_key,
     save_events_to_csv,
 )
 
@@ -142,3 +145,23 @@ def test_calculate_timestamp_is_frame_accurate(
     expected_timestamp: float,
 ) -> None:
     assert calculate_timestamp(frame_idx, fps) == expected_timestamp
+
+
+def test_normalize_key_arrow_codes():
+    for code in KEY_LEFT_CODES:
+        assert normalize_key(code) == "left"
+    for code in KEY_RIGHT_CODES:
+        assert normalize_key(code) == "right"
+
+
+def test_normalize_key_case_insensitivity():
+    assert normalize_key(ord("m")) == "m"
+    assert normalize_key(ord("M")) == "m"
+    assert normalize_key(ord("u")) == "u"
+    assert normalize_key(ord("U")) == "u"
+    assert normalize_key(ord("q")) == "q"
+    assert normalize_key(ord("Q")) == "q"
+
+
+def test_normalize_key_unhandled_code():
+    assert normalize_key(999999) == 999999
