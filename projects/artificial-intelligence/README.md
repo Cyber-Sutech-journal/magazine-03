@@ -173,6 +173,9 @@ For the full AGPL-3.0 text, see: <https://www.gnu.org/licenses/agpl-3.0.html>
 Use `scripts/annotate_ground_truth.py` to create manual ground-truth
 annotations for video line-crossing events.
 
+### Frame Accuracy & Seeking Behavior
+To prevent frame drift and codec decoding inaccuracies (especially on inter-frame compressed video like H.264), the tool relies on sequential reading (`capture.read()`) during normal playback and forward steps. Seeking (`CAP_PROP_POS_FRAMES`) is only performed when stepping backward or jumping.
+
 ### Usage
 ```powershell
 python .\scripts\annotate_ground_truth.py `
@@ -197,7 +200,6 @@ When marking a crossing, the tool prompts for:
 ### Output CSV schema
 frame_idx,timestamp_seconds,class_name,direction,line_id,video_name
 
-
-- ` frame_idx` is zero-based.
-- ` timestamp_seconds` is calculated as `frame_idx / FPS`.
--   Each marked crossing creates exactly one CSV row.
+- `frame_idx` is zero-based.
+- `timestamp_seconds` is calculated as `frame_idx / FPS`.
+-  Each marked crossing creates exactly one CSV row.

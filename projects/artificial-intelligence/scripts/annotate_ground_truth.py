@@ -165,13 +165,19 @@ def run_annotation(
     playing = True
     window_name = "Ground Truth Annotation"
 
+    last_decoded_idx = -1
+
     try:
         while True:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, current_idx)
+            if current_idx != last_decoded_idx + 1:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, current_idx)
+
             success, frame = capture.read()
 
             if not success:
                 break
+
+            last_decoded_idx = current_idx
 
             displayed = draw_overlay(
                 frame=frame,
