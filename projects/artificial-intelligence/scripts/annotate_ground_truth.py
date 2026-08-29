@@ -302,10 +302,10 @@ def run_annotation(
                 break
 
             if playing:
-                if current_idx >= max(total_frames - 1, 0):
-                    break
-
-                current_idx += 1
+                if current_idx + 1 < total_frames:
+                    current_idx += 1
+                else:
+                    playing = False  # Pause at the last frame instead of auto-exiting
 
     finally:
         capture.release()
