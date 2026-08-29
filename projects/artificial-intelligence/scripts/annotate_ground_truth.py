@@ -122,6 +122,7 @@ def parse_args() -> argparse.Namespace:
 
 def ask_crossing_details() -> tuple[str, str, str] | None:
     """Read and validate class, direction, and line information."""
+    print("\n[!] Check the terminal — waiting for input below.")
     class_name = input("class_name: ").strip()
     if not class_name:
         print("Annotation cancelled: class_name cannot be empty.")
@@ -235,8 +236,10 @@ def run_annotation(
                 continue
 
             if key == ord("m"):
+                playing = False  # pause so the frame stays visible while typing in terminal
                 print(f"\nMarking crossing at frame {current_idx}")
                 details = ask_crossing_details()
+                playing = True  # resume playback after the prompt is answered
 
                 if details is not None:
                     class_name, direction, line_id = details
