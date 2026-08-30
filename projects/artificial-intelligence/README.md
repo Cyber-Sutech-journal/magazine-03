@@ -177,6 +177,14 @@ annotations for video line-crossing events.
 To prevent frame drift and codec decoding inaccuracies (especially on inter-frame compressed video like H.264), the tool relies on sequential reading (`capture.read()`) during normal playback and forward steps. Seeking (`CAP_PROP_POS_FRAMES`) is only performed when stepping backward or jumping.
 
 ### Usage
+
+**Linux / macOS (Bash):**
+```bash
+python ./scripts/annotate_ground_truth.py \
+  --video "./path/to/clip.mp4" \
+  --output "./path/to/ground_truth.csv"
+
+**Windows (PowerShell):**
 ```powershell
 python .\scripts\annotate_ground_truth.py `
 --video ".\path\to\clip.mp4" `
