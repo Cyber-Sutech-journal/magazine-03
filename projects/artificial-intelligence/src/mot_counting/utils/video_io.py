@@ -13,7 +13,12 @@ from mot_counting.interfaces.frame_source import IFrameSource
 class OpenCvFrameSource(IFrameSource):
     """Read sequential frames and metadata from a video file using OpenCV."""
 
-    _DEFAULT_FPS = 30.0
+    # Fallback frame rate used when a video container does not report a valid,
+    # finite FPS (e.g. 0, negative, NaN, or inf from cv2.CAP_PROP_FPS).
+    # Rationale: Target surveillance and traffic footage in this project is predominantly
+    # 25-30 FPS. Setting 30.0 FPS provides a standardized baseline and minimizes drift
+    # when converting cooldown and stale-timeout thresholds from seconds to frames downstream.
+    DEFAULT_FPS: float = 30.0
 
     def __init__(self, video_path: str | Path) -> None:
         """Open a video file and fail fast if it cannot be accessed.
@@ -51,11 +56,20 @@ class OpenCvFrameSource(IFrameSource):
         return True, frame
 
     def get_fps(self) -> float:
-        """Return the video frame rate, using a safe fallback if invalid."""
+        """Return the video frame rate in frames per second.
+
+        Returns the FPS reported by cv2.CAP_PROP_FPS. If the reported value
+        is non-positive or non-finite (NaN, inf), falls back to the documented
+        project baseline of ``_DEFAULT_FPS`` (30.0).
+
+        Note:
+            Downstream components rely on FPS to convert seconds-based timeouts
+            (e.g., stale-timeout, cooldown) into frame counts.
+        """
         fps = float(self._capture.get(cv2.CAP_PROP_FPS))
 
         if not np.isfinite(fps) or fps <= 0:
-            return self._DEFAULT_FPS
+            return self.DEFAULT_FPS
 
         return fps
 

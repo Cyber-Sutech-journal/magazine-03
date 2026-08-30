@@ -1,4 +1,6 @@
+import math
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
@@ -106,3 +108,30 @@ def test_release_is_safe(tmp_path: Path) -> None:
 
     source.release()
     source.release()
+
+
+class TestGetFpsFallback:
+    """Validate FPS fallback behavior on invalid or non-finite values."""
+
+    @pytest.mark.parametrize(
+        "bad_fps",
+        [0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+        ids=["zero", "negative", "nan", "inf", "neg-inf"],
+    )
+    def test_invalid_fps_falls_back_to_default(self, bad_fps: float) -> None:
+        with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+            source = OpenCvFrameSource()
+        source._capture = MagicMock()
+        source._capture.get.return_value = bad_fps
+
+        fps = source.get_fps()
+        assert fps == OpenCvFrameSource.DEFAULT_FPS
+        assert math.isfinite(fps) and fps > 0
+
+    def test_valid_fps_is_returned_as_is(self) -> None:
+        with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+            source = OpenCvFrameSource()
+        source._capture = MagicMock()
+        source._capture.get.return_value = 25.0
+
+        assert source.get_fps() == pytest.approx(25.0)
