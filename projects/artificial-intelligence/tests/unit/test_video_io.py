@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from mot_counting.utils.video_io import OpenCvFrameSource
+from mot_counting.utils.video_io import IFrameSource, OpenCvFrameSource
 
 
 def create_synthetic_video(
@@ -150,3 +150,8 @@ class TestGetFpsFallback:
         source._capture.get.return_value = 25.0
 
         assert source.get_fps() == pytest.approx(25.0)
+
+
+def test_opencv_frame_source_conforms_to_interface() -> None:
+    """Verify OpenCvFrameSource satisfies the IFrameSource interface."""
+    assert issubclass(OpenCvFrameSource, IFrameSource)
