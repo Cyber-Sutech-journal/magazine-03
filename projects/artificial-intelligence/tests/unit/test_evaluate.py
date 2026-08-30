@@ -1,7 +1,8 @@
-"""Unit tests for T18 Stage 1 evaluation matching and metrics."""
+"""Unit tests for T18 evaluation matching, metrics, CLI, and artifacts."""
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from mot_counting.evaluation import (
     load_prediction_events,
 )
 from mot_counting.types import Direction
+from scripts import evaluate as evaluate_cli
 
 LINE = "main_line"
 CLASS = "person"
@@ -310,3 +312,227 @@ def test_prediction_csv_schema_round_trip(tmp_path: Path) -> None:
     assert predictions[0].direction is Direction.IN
     assert predictions[0].line_id == "main_line"
     assert ground_truths[0].frame_idx == 10
+
+
+def _write_csv(path: Path, header: str, rows: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(header + "\n" + "\n".join(rows) + "\n", encoding="utf-8")
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def test_t12_prediction_and_t13_ground_truth_csv_contracts(tmp_path: Path) -> None:
+    predictions_path = tmp_path / "predictions.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    _write_csv(
+        predictions_path,
+        (
+            "frame_idx,timestamp_seconds,track_id,class_id,class_name,direction,line_id,"
+            "confidence,bbox_x1,bbox_y1,bbox_x2,bbox_y2,video_name"
+        ),
+        ["12,0.4,73,0,person,IN,main_line,0.91,1,2,3,4,clip.mp4"],
+    )
+    _write_csv(
+        ground_truth_path,
+        "frame_idx,timestamp_seconds,class_name,direction,line_id",
+        ["13,0.433333,person,IN,main_line"],
+    )
+
+    predictions = load_prediction_events(predictions_path)
+    ground_truths = load_ground_truth_events(ground_truth_path)
+
+    assert predictions[0].frame_idx == 12
+    assert predictions[0].track_id == 73
+    assert ground_truths[0].frame_idx == 13
+    assert ground_truths[0].track_id is None
+
+
+def test_cli_uses_explicit_tolerance(tmp_path: Path) -> None:
+    predictions_path = tmp_path / "predictions.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    output_dir = tmp_path / "artifacts"
+    header = "frame_idx,timestamp_seconds,class_name,direction,line_id"
+    _write_csv(predictions_path, header, ["10,1.4,person,IN,main_line"])
+    _write_csv(ground_truth_path, header, ["9,1.0,person,IN,main_line"])
+
+    exit_code = evaluate_cli.main(
+        [
+            "--predictions",
+            str(predictions_path),
+            "--ground-truth",
+            str(ground_truth_path),
+            "--tolerance-seconds",
+            "0.3",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    overall = _read_csv(output_dir / "evaluation_summary.csv")[0]
+    assert (overall["tp"], overall["fp"], overall["fn"]) == ("0", "1", "1")
+
+
+def test_cli_omitted_tolerance_loads_project_default_from_any_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inputs_dir = tmp_path / "inputs"
+    predictions_path = inputs_dir / "predictions.csv"
+    ground_truth_path = inputs_dir / "ground_truth.csv"
+    output_dir = tmp_path / "artifacts"
+    header = "frame_idx,timestamp_seconds,class_name,direction,line_id"
+    _write_csv(predictions_path, header, ["10,1.9,person,IN,main_line"])
+    _write_csv(ground_truth_path, header, ["9,1.0,person,IN,main_line"])
+    monkeypatch.chdir(tmp_path)
+
+    evaluate_cli.main(
+        [
+            "--predictions",
+            str(predictions_path),
+            "--ground-truth",
+            str(ground_truth_path),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    overall = _read_csv(output_dir / "evaluation_summary.csv")[0]
+    assert overall["tp"] == "1"
+
+
+def test_cli_artifacts_cover_groups_outcomes_track_id_and_are_deterministic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    predictions_path = tmp_path / "predictions.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    output_dir = tmp_path / "nested" / "artifacts"
+    _write_csv(
+        predictions_path,
+        "frame_idx,timestamp_seconds,track_id,class_id,class_name,direction,line_id",
+        [
+            "20,2.0,42,0,person,IN,main_line",
+            "21,2.0,43,0,person,IN,main_line",
+            "50,5.0,99,2,car,OUT,main_line",
+        ],
+    )
+    _write_csv(
+        ground_truth_path,
+        "frame_idx,timestamp_seconds,class_name,direction,line_id",
+        [
+            "10,1.0,person,IN,main_line",
+            "80,8.0,bicycle,OUT,side_line",
+        ],
+    )
+    arguments = [
+        "--predictions",
+        str(predictions_path),
+        "--ground-truth",
+        str(ground_truth_path),
+        "--tolerance-seconds",
+        "1.0",
+        "--output-dir",
+        str(output_dir),
+    ]
+
+    evaluate_cli.main(arguments)
+
+    summary_path = output_dir / "evaluation_summary.csv"
+    matches_path = output_dir / "evaluation_matches.csv"
+    first_summary = summary_path.read_bytes()
+    first_matches = matches_path.read_bytes()
+    summary = _read_csv(summary_path)
+    matches = _read_csv(matches_path)
+    stdout = capsys.readouterr().out
+
+    assert [(row["scope"], row["line_id"], row["class_name"]) for row in summary] == [
+        ("overall", "", ""),
+        ("group", "main_line", "car"),
+        ("group", "main_line", "person"),
+        ("group", "side_line", "bicycle"),
+    ]
+    assert (summary[0]["tp"], summary[0]["fp"], summary[0]["fn"]) == ("1", "2", "1")
+    assert float(summary[0]["event_precision"]) == pytest.approx(1 / 3)
+    assert float(summary[0]["event_recall"]) == pytest.approx(0.5)
+    assert float(summary[0]["event_f1"]) == pytest.approx(0.4)
+    assert summary[0]["absolute_counting_error"] == "1"
+    assert float(summary[0]["relative_counting_error"]) == pytest.approx(0.5)
+    assert float(summary[0]["percentage_counting_error"]) == pytest.approx(50.0)
+    assert summary[1]["gt_count"] == "0"
+    assert summary[1]["relative_counting_error"] == "N/A"
+    assert summary[1]["percentage_counting_error"] == "N/A"
+
+    assert [row["status"] for row in matches] == ["FP", "TP", "FP", "FN"]
+    true_positive = next(row for row in matches if row["status"] == "TP")
+    duplicate_fp = next(
+        row for row in matches if row["status"] == "FP" and row["class_name"] == "person"
+    )
+    false_negative = next(row for row in matches if row["status"] == "FN")
+    assert true_positive["prediction_track_id"] == "42"
+    assert float(true_positive["time_delta_seconds"]) == pytest.approx(1.0)
+    assert duplicate_fp["prediction_track_id"] == "43"
+    assert duplicate_fp["gt_frame_idx"] == ""
+    assert false_negative["prediction_frame_idx"] == ""
+    assert false_negative["prediction_track_id"] == ""
+    table_lines = [line for line in stdout.splitlines() if "|" in line]
+    table_headers = [cell.strip() for cell in table_lines[0].split("|")]
+    table_rows = [
+        dict(zip(table_headers, (cell.strip() for cell in line.split("|")), strict=True))
+        for line in table_lines[1:]
+    ]
+    assert table_headers == [
+        "Scope",
+        "Group",
+        "TP",
+        "FP",
+        "FN",
+        "Precision",
+        "Recall",
+        "F1",
+        "Abs Count Error",
+        "Rel Count Error",
+    ]
+    assert table_rows[0] == {
+        "Scope": "Overall",
+        "Group": "All events",
+        "TP": "1",
+        "FP": "2",
+        "FN": "1",
+        "Precision": "0.3333",
+        "Recall": "0.5000",
+        "F1": "0.4000",
+        "Abs Count Error": "1",
+        "Rel Count Error": "0.5000",
+    }
+    assert table_rows[2]["Group"] == "main_line / person / IN"
+    assert table_rows[2]["TP"] == "1"
+    assert table_rows[1]["Recall"] == "N/A"
+    assert table_rows[1]["Rel Count Error"] == "N/A"
+
+    evaluate_cli.main(arguments)
+    assert summary_path.read_bytes() == first_summary
+    assert matches_path.read_bytes() == first_matches
+
+
+def test_cli_defaults_output_alongside_predictions(tmp_path: Path) -> None:
+    inputs_dir = tmp_path / "inputs"
+    predictions_path = inputs_dir / "predictions.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    header = "frame_idx,timestamp_seconds,class_name,direction,line_id"
+    _write_csv(predictions_path, header, ["1,0.1,person,IN,main_line"])
+    _write_csv(ground_truth_path, header, ["1,0.1,person,IN,main_line"])
+
+    exit_code = evaluate_cli.main(
+        [
+            "--predictions",
+            str(predictions_path),
+            "--ground-truth",
+            str(ground_truth_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert (inputs_dir / "evaluation_summary.csv").is_file()
+    assert (inputs_dir / "evaluation_matches.csv").is_file()
