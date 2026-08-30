@@ -95,6 +95,16 @@ def save_events_to_csv(
             )
 
 
+def record_event(
+    event: AnnotationEvent,
+    events_list: list[AnnotationEvent],
+    out_path: str | Path,
+) -> None:
+    """Append event and incrementally auto-save to prevent data loss on crash."""
+    events_list.append(event)
+    save_events_to_csv(events_list, out_path)
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments and document keyboard controls."""
     parser = argparse.ArgumentParser(
@@ -228,54 +238,22 @@ def run_annotation(
             delay = max(1, round(1000 / fps)) if playing else 0
             key = cv2.waitKeyEx(delay)
 
-            if key in (ord("q"), 27):
-                break
-
-            if key == ord(" "):
-                playing = not playing
-                continue
-
-            if key == ord("m"):
-                playing = False  # pause so the frame stays visible while typing in terminal
-                print(f"\nMarking crossing at frame {current_idx}")
-                details = ask_crossing_details()
-                playing = True  # resume playback after the prompt is answered
-
-                if details is not None:
-                    class_name, direction, line_id = details
-                    events.append(
-                        AnnotationEvent(
-                            frame_idx=current_idx,
-                            timestamp_seconds=calculate_timestamp(
-                                current_idx,
-                                fps,
-                            ),
-                            class_name=class_name,
-                            direction=direction,
-                            line_id=line_id,
-                            video_name=video_name,
-                        )
-                    )
-                    print("Annotation added.")
-
-                continue
-
-            if key == ord("u"):
-                if events:
-                    removed = events.pop()
-                    print(f"Removed annotation at frame {removed.frame_idx}.")
-                else:
-                    print("No annotation to remove.")
-
-                continue
-
-            key = cv2.waitKeyEx(delay)
             if key == -1:
                 if playing:
-                    current_idx = min(max(total_frames - 1, 0), current_idx + 1)
+                    if current_idx + 1 < total_frames:
+                        current_idx += 1
+                    else:
+                        playing = False
                 continue
 
             action = normalize_key(key)
+
+            if action in ("q", "\x1b", 27):
+                break
+
+            if action in (" ", ord(" ")):
+                playing = not playing
+                continue
 
             if action == "left":
                 current_idx = max(0, current_idx - 1)
@@ -287,28 +265,42 @@ def run_annotation(
                 playing = False
                 continue
 
-            if action == " ":
-                playing = not playing
-                continue
-
             if action == "m":
-                ts = calculate_timestamp(current_idx, fps)
-                events.append(AnnotationEvent(frame_idx=current_idx, timestamp=ts, label="anomaly"))
+                playing = False
+                print(f"\nMarking crossing at frame {current_idx}")
+                details = ask_crossing_details()
+                playing = True
+
+                if details is not None:
+                    class_name, direction, line_id = details
+                    event = AnnotationEvent(
+                        frame_idx=current_idx,
+                        timestamp_seconds=calculate_timestamp(current_idx, fps),
+                        class_name=class_name,
+                        direction=direction,
+                        line_id=line_id,
+                        video_name=video_name,
+                    )
+                    record_event(event, events, output_path)
+                    print("Annotation added and auto-saved.")
+
                 continue
 
             if action == "u":
                 if events:
-                    events.pop()
-                continue
+                    removed = events.pop()
+                    save_events_to_csv(events, output_path)
+                    print(f"Removed annotation at frame {removed.frame_idx} and updated CSV.")
+                else:
+                    print("No annotation to remove.")
 
-            if action in ("q", "\x1b"):
-                break
+                continue
 
             if playing:
                 if current_idx + 1 < total_frames:
                     current_idx += 1
                 else:
-                    playing = False  # Pause at the last frame instead of auto-exiting
+                    playing = False
 
     finally:
         capture.release()
