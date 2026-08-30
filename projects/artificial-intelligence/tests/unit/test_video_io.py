@@ -84,6 +84,11 @@ def test_reads_frames_and_returns_none_at_end(tmp_path: Path) -> None:
 
         assert success is False
         assert frame is None
+
+        for _ in range(3):
+            success, frame = source.read()
+            assert success is False
+            assert frame is None
     finally:
         source.release()
 
