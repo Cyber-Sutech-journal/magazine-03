@@ -50,6 +50,16 @@ def test_constructor_raises_for_missing_video() -> None:
         OpenCvFrameSource("does-not-exist.avi")
 
 
+def test_constructor_raises_for_unopenable_video(tmp_path: Path) -> None:
+    corrupted_file = tmp_path / "corrupt_video.avi"
+    corrupted_file.write_text("not a real video file content")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        OpenCvFrameSource(corrupted_file)
+
+    assert str(corrupted_file) in str(exc_info.value)
+
+
 def test_reads_frames_and_returns_none_at_end(tmp_path: Path) -> None:
     video_path = tmp_path / "synthetic.avi"
     create_synthetic_video(video_path, frame_count=3)
