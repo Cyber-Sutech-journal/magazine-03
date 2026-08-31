@@ -1,3 +1,8 @@
+"""
+In-memory implementation of the event repository.
+Used primarily for testing and transient data storage.
+"""
+
 from mot_counting.interfaces.repository import IEventRepository
 from mot_counting.types import CrossingEvent
 
