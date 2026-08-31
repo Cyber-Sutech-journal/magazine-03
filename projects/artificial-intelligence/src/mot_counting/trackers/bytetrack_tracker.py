@@ -6,7 +6,7 @@ import torch
 from ultralytics.trackers.byte_tracker import BYTETracker
 
 from mot_counting.interfaces.tracker import ITracker
-from mot_counting.types import Track
+from mot_counting.types import Detection, Track
 
 
 class UltralyticsResultsMock:
@@ -48,21 +48,21 @@ class ByteTrackArgs(SimpleNamespace):
 
     def __getattr__(self, name: str) -> Any:
         defaults = {
-            "track_high_thresh": getattr(self, "track_thresh", 0.25),
+            "track_high_thresh": getattr(self, "track_thresh", 0.5),
             "track_low_thresh": 0.1,
-            "new_track_thresh": getattr(self, "track_thresh", 0.25) + 0.1,
+            "new_track_thresh": getattr(self, "track_thresh", 0.5) + 0.1,
         }
         return defaults.get(name, 0.0)
 
 
 class ByteTrackWrapper(ITracker):
-    """ByteTrack wrapper supporting detection objects as well as numpy arrays."""
+    """ByteTrack wrapper supporting detection objects."""
 
     __slots__ = ("args", "tracker", "_class_names")
 
     def __init__(
         self,
-        track_thresh: float = 0.25,
+        track_thresh: float = 0.5,
         match_thresh: float = 0.8,
         track_buffer: int = 30,
         frame_rate: int = 30,
@@ -83,67 +83,58 @@ class ByteTrackWrapper(ITracker):
 
     def update(
         self,
-        detections: list[Any] | None = None,
-        frame_idx: int = 0,
-        frame: np.ndarray | None = None,
-        boxes: np.ndarray | None = None,
-        scores: np.ndarray | None = None,
-        class_ids: np.ndarray | None = None,
+        detections: list[Detection],
+        frame_idx: int,
+        frame: np.ndarray,
     ) -> list[Track]:
-        """Update tracker with detections from current frame."""
-        if detections is not None:
-            if len(detections) == 0:
-                return []
+        """Update tracker with detections from current frame.
 
-            boxes_list, scores_list, cls_list = [], [], []
+        Note:
+            The `frame` argument is required by the `ITracker` interface for
+            forward-compatibility with visual/appearance-based trackers (e.g., BoT-SORT).
+            It is intentionally unused by ByteTrack, which is purely motion-based.
+        """
+        if detections:
             for det in detections:
-                xyxy = getattr(det, "xyxy", None)
-                if xyxy is None and hasattr(det, "bbox"):
-                    xyxy = det.bbox
-                conf = getattr(det, "confidence", None)
-                if conf is None and hasattr(det, "score"):
-                    conf = det.score
-                cid = getattr(det, "class_id", 0)
-                cname = getattr(det, "class_name", str(cid))
+                self._class_names[det.class_id] = det.class_name
 
-                self._class_names[cid] = cname
-                boxes_list.append(xyxy)
-                scores_list.append(conf)
-                cls_list.append(cid)
-
-            boxes_arr = np.asarray(boxes_list, dtype=np.float32)
-            scores_arr = np.asarray(scores_list, dtype=np.float32)
-            class_ids_arr = np.asarray(cls_list, dtype=np.float32)
-
-        elif boxes is not None and scores is not None and class_ids is not None:
-            if len(boxes) == 0:
-                return []
-            boxes_arr = np.asarray(boxes, dtype=np.float32)
-            scores_arr = np.asarray(scores, dtype=np.float32)
-            class_ids_arr = np.asarray(class_ids, dtype=np.float32)
+            boxes_arr = np.array([det.xyxy for det in detections], dtype=np.float32)
+            scores_arr = np.array([det.confidence for det in detections], dtype=np.float32)
+            class_ids_arr = np.array([det.class_id for det in detections], dtype=np.int32)
         else:
-            return []
+            boxes_arr = np.empty((0, 4), dtype=np.float32)
+            scores_arr = np.empty((0,), dtype=np.float32)
+            class_ids_arr = np.empty((0,), dtype=np.int32)
 
         results_mock = UltralyticsResultsMock(boxes_arr, scores_arr, class_ids_arr)
 
-        tracks = self.tracker.update(results_mock, img=frame)
+        tracks = self.tracker.update(results_mock, img=None)
         if len(tracks) == 0:
             return []
 
-        tracked_objects: list[Track] = []
-        for track in tracks:
-            cls_id = int(track[6])
-            tracked_objects.append(
+        out_tracks: list[Track] = []
+        for t in tracks:
+            cls_id = int(t[5]) if len(t) > 5 else 0
+            cls_name = self._class_names.get(cls_id, "")
+
+            # Extract valid positive score (Ultralytics byte_tracker format fallback)
+            score = 1.0
+            if len(t) > 6 and float(t[6]) > 0.0:
+                score = float(t[6])
+            elif len(t) > 4 and 0.0 < float(t[4]) <= 1.0:
+                score = float(t[4])
+
+            out_tracks.append(
                 Track(
-                    track_id=int(track[4]),
-                    bbox=[float(track[0]), float(track[1]), float(track[2]), float(track[3])],
-                    score=float(track[5]),
+                    track_id=int(t[4]),
+                    bbox=tuple(t[:4]),
                     class_id=cls_id,
-                    class_name=self._class_names.get(cls_id, str(cls_id)),
+                    class_name=cls_name,
+                    score=score,
                 )
             )
 
-        return tracked_objects
+        return out_tracks
 
     def reset(self) -> None:
         """Reset internal tracker state and mappings."""
