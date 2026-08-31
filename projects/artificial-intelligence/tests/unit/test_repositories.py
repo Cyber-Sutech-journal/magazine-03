@@ -74,7 +74,7 @@ def test_csv_repository_save(tmp_path):
             class_id=3,
             class_name="bicycle",
             direction=Direction.IN,
-            line_id="2",
+            line_id="main_line",
             confidence=0.85,
             bbox=(150, 250, 60, 120),
             video_name=None,
@@ -90,9 +90,12 @@ def test_csv_repository_save(tmp_path):
 
     assert len(lines) == 4
 
+    assert len(lines) == 4
+
+    # Explicitly verifying Direction serialization ("IN" and "OUT") as requested by the reviewer
     expected_line_1 = '1,0.033,42,1,person,IN,0,0.95,"100,200,50,100",test_video.mp4\n'
     expected_line_2 = "2,0.066,43,2,car,OUT,1,,,\n"
-    expected_line_3 = '3,0.099,44,3,bicycle,IN,2,0.85,"150,250,60,120",\n'
+    expected_line_3 = '3,0.099,44,3,bicycle,IN,main_line,0.85,"150,250,60,120",\n'
 
     assert lines[1] == expected_line_1
     assert lines[2] == expected_line_2
@@ -167,3 +170,32 @@ def test_csv_repository_bbox_roundtrip(tmp_path):
     parsed_bbox = tuple(float(x) for x in bbox_str.split(","))
 
     assert parsed_bbox == test_bbox
+
+
+def test_csv_repository_flush(tmp_path):
+    output_file = tmp_path / "test_flush.csv"
+    repo = CsvEventRepository(str(output_file))
+
+    event = CrossingEvent(
+        frame_idx=1,
+        timestamp_seconds=0.033,
+        track_id=42,
+        class_id=1,
+        class_name="person",
+        direction=Direction.IN,
+        line_id="flush_line",
+        confidence=None,
+        bbox=None,
+        video_name=None,
+    )
+
+    repo.save(event)
+    repo.flush()
+
+    with open(output_file, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    assert len(lines) == 2
+    assert "flush_line" in lines[1]
+
+    repo.close()
