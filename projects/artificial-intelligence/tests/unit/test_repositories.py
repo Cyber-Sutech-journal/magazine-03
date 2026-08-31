@@ -1,9 +1,7 @@
 import csv
 
-from src.mot_counting.repositories.csv_event_repository import (
-    CsvEventRepository,
-    InMemoryEventRepository,
-)
+from src.mot_counting.repositories.csv_event_repository import CsvEventRepository
+from src.mot_counting.repositories.in_memory_event_repository import InMemoryEventRepository
 from src.mot_counting.types import CrossingEvent, Direction
 
 

@@ -3,8 +3,13 @@ from mot_counting.types import CrossingEvent
 
 
 class InMemoryEventRepository(IEventRepository):
-    def __init__(self):
-        self.events = []
+    """
+    In-memory implementation of the event repository.
+    Used primarily for testing and transient data storage.
+    """
+
+    def __init__(self) -> None:
+        self.events: list[CrossingEvent] = []
 
     def save(self, event: CrossingEvent) -> None:
         self.events.append(event)
