@@ -1,8 +1,8 @@
 import csv
 
-from src.mot_counting.repositories.csv_event_repository import CsvEventRepository
-from src.mot_counting.repositories.in_memory_event_repository import InMemoryEventRepository
-from src.mot_counting.types import CrossingEvent, Direction
+from mot_counting.repositories.csv_event_repository import CsvEventRepository
+from mot_counting.repositories.in_memory_event_repository import InMemoryEventRepository
+from mot_counting.types import CrossingEvent, Direction
 
 
 def test_in_memory_repository_save():
