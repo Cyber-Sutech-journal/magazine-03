@@ -1,3 +1,13 @@
+"""
+Geometry utilities for bounding box manipulation and crossing logic.
+
+Coordinate System & Sign Convention:
+This module uses a standard 2D coordinate system. For distance and side calculations,
+a positive cross-product value corresponds to the left side when walking along the
+directed line from point A to point B (following the right-hand rule).
+"""
+
+
 def signed_distance(
     point_a: tuple[float, float], point_b: tuple[float, float], point_p: tuple[float, float]
 ) -> float:
@@ -39,28 +49,19 @@ def signed_distance(
 
 def get_side(distance: float) -> int:
     """
-    Determine which side of a line a point is on.
+    Determine which side of a line a point is on based on the raw distance.
 
-    if our signed distance is positive number, the result its 1
-    it means point is above the line defined by point_a and point_b
-    ---
-    if our signed distance is negative number, the result its -1
-    it means point is below the line defined by point_a and point_b
-    ---
-    if our signed distance is 0.0, the result its 0
-    it means point is on the line defined by point_a and point_b
+    - Positive distance -> Returns 1 (left side of the directed line).
+    - Negative distance -> Returns -1 (right side of the directed line).
+    - Zero distance (0.0) -> Returns 0. This means the point lies exactly
+      on the line. Crossing Logic must treat this as "no decisive side"
+      (do not emit a crossing or flip confirmed_side).
 
     Args:
-        distance (float): The signed distance from the point to the line.
-
-        For example:
-        if we have a signed distance is 50.0 after calling this function, it will return 1
-        this means point is above the line defined by point_a and point_b
-
-
+        distance (float): The raw cross-product from `signed_distance`.
 
     Returns:
-        int: 1 if the point is on one side of the line, -1 if on the other side, 0 if on the line.
+        int: 1 (left), -1 (right), or 0 (exactly on the line).
     """
     if distance > 0:
         return 1
@@ -74,16 +75,14 @@ def get_bottom_center(bbox: tuple[float, float, float, float]) -> tuple[float, f
     """
     Get the bottom center point of a bounding box.
 
+    This specific point represents the ground-contact point of the object,
+    which is why it is chosen as the default reference for crossing evaluation.
+
     Args:
         bbox (tuple[float, float, float, float]): Bounding box coordinates (x_min, y_min, x_max, y_max).
 
-            For example:
-            our bounding box Coordinates is (10.0, 20.0, 30.0, 60.0)
-            in result after calling this function, it will return (20.0, 60.0)
-            that means bottom center point of our bounding box Coordinates is (20.0, 60.0)
-
     Returns:
-        tuple[float, float]: Coordinates of the bottom center point (x_center, y_bottom).
+        tuple[float, float]: Coordinates of the bottom center point.
     """
     x_min, y_min, x_max, y_max = bbox
     x_center = (x_min + x_max) / 2
