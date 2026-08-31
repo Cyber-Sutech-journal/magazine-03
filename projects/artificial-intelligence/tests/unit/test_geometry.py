@@ -1,4 +1,4 @@
-from src.mot_counting.utils.geometry import (
+from mot_counting.utils.geometry import (
     get_bbox_center,
     get_bottom_center,
     get_side,
@@ -106,3 +106,31 @@ def test_signed_distance():
     point_p = (5.0, 5.0)
     expected_distance = 0.0
     assert signed_distance(point_a, point_b, point_p) == expected_distance
+
+
+def test_geometry_end_to_end_chain():
+    """
+    Test the full chain: get_side(signed_distance(...))
+    for both horizontal and vertical lines to ensure end-to-end correctness.
+    """
+    # 1. Horizontal line: A(0,0) -> B(10,0)
+    point_a_horiz = (0.0, 0.0)
+    point_b_horiz = (10.0, 0.0)
+
+    # Left side (y > 0)
+    assert get_side(signed_distance(point_a_horiz, point_b_horiz, (5.0, 5.0))) == 1
+    # Right side (y < 0)
+    assert get_side(signed_distance(point_a_horiz, point_b_horiz, (5.0, -5.0))) == -1
+    # Exactly on line (y = 0)
+    assert get_side(signed_distance(point_a_horiz, point_b_horiz, (5.0, 0.0))) == 0
+
+    # 2. Vertical line: A(0,0) -> B(0,10)
+    point_a_vert = (0.0, 0.0)
+    point_b_vert = (0.0, 10.0)
+
+    # Left side (x < 0)
+    assert get_side(signed_distance(point_a_vert, point_b_vert, (-5.0, 5.0))) == 1
+    # Right side (x > 0)
+    assert get_side(signed_distance(point_a_vert, point_b_vert, (5.0, 5.0))) == -1
+    # Exactly on line (x = 0)
+    assert get_side(signed_distance(point_a_vert, point_b_vert, (0.0, 5.0))) == 0
