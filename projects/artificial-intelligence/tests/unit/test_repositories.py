@@ -90,9 +90,10 @@ def test_csv_repository_save(tmp_path):
 
     assert len(lines) == 4
 
-    assert len(lines) == 4
+    assert ",IN," in lines[1], "Direction.IN was not serialized as plain string 'IN'"
+    assert ",OUT," in lines[2], "Direction.OUT was not serialized as plain string 'OUT'"
+    assert ",IN," in lines[3], "Direction.IN was not serialized as plain string 'IN'"
 
-    # Explicitly verifying Direction serialization ("IN" and "OUT") as requested by the reviewer
     expected_line_1 = '1,0.033,42,1,person,IN,0,0.95,"100,200,50,100",test_video.mp4\n'
     expected_line_2 = "2,0.066,43,2,car,OUT,1,,,\n"
     expected_line_3 = '3,0.099,44,3,bicycle,IN,main_line,0.85,"150,250,60,120",\n'
