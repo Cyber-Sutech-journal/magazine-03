@@ -113,7 +113,7 @@ def test_geometry_end_to_end_chain():
     Test the full chain: get_side(signed_distance(...))
     for both horizontal and vertical lines to ensure end-to-end correctness.
     """
-    # 1. Horizontal line: A(0,0) -> B(10,0)
+    # case 1: Horizontal line: A(0,0) -> B(10,0)
     point_a_horiz = (0.0, 0.0)
     point_b_horiz = (10.0, 0.0)
 
@@ -124,7 +124,7 @@ def test_geometry_end_to_end_chain():
     # Exactly on line (y = 0)
     assert get_side(signed_distance(point_a_horiz, point_b_horiz, (5.0, 0.0))) == 0
 
-    # 2. Vertical line: A(0,0) -> B(0,10)
+    # Case 2: Vertical line: A(0,0) -> B(0,10)
     point_a_vert = (0.0, 0.0)
     point_b_vert = (0.0, 10.0)
 
