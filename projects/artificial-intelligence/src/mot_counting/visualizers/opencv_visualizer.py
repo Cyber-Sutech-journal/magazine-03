@@ -85,14 +85,39 @@ def _count(direction_counts: dict[str, Any], direction: str) -> int:
     return 0
 
 
-def format_counters_overlay(counters: dict[str, Any]) -> list[str]:
+def format_counters_overlay(counters: dict[Any, Any]) -> list[str]:
     """Format a counters dict into human-readable HUD lines.
 
-    Supports two shapes:
-    * Flat:     {"person": {"in": 2, "out": 1}}        -> "Person IN: 2 OUT: 1"
-    * Per-line: {"Gate-1": {"person": {"in": 2, ...}}  -> "[Gate-1]" + indented rows
+    Supports three shapes:
+    * Canonical tuple: {(class_name, line_id, direction): count}
+    * Flat dict:       {"person": {"in": 2, "out": 1}}
+    * Nested dict:     {"Gate-1": {"person": {"in": 2, ...}}}
     """
+    if not counters:
+        return []
+
     lines: list[str] = []
+    first_key = next(iter(counters.keys()))
+
+    # Case 1: Canonical Spec §7.4 tuple-key mapping: (class_name, line_id, direction) -> count
+    if isinstance(first_key, tuple) and len(first_key) == 3:
+        grouped: dict[str, dict[str, dict[str, int]]] = {}
+        for (cls_name, line_id, direction), count in counters.items():
+            dir_str = str(getattr(direction, "value", direction)).lower()
+            cls_str = str(cls_name)
+            lid_str = str(line_id)
+            grouped.setdefault(lid_str, {}).setdefault(cls_str, {})[dir_str] = int(count)
+
+        for line_id, class_map in sorted(grouped.items()):
+            lines.append(f"[{line_id}]")
+            for cls_name, directions in sorted(class_map.items()):
+                lines.append(
+                    f"{OVERLAY_INDENT}{cls_name.capitalize()} "
+                    f"IN: {_count(directions, 'in')} OUT: {_count(directions, 'out')}"
+                )
+        return lines
+
+    # Case 2 & 3: Flat or nested dictionary
     for section, value in counters.items():
         if isinstance(value, dict) and value and all(isinstance(v, dict) for v in value.values()):
             # Nested shape: line_id -> class -> {in/out}
@@ -131,7 +156,7 @@ def _as_point(value: Any) -> tuple[int, int] | None:
     """Convert a 2D coordinate into an int tuple, or None if malformed."""
     try:
         x, y = value
-        return int(x), int(y)
+        return int(round(x)), int(round(y))
     except (TypeError, ValueError):
         return None
 
@@ -139,14 +164,17 @@ def _as_point(value: Any) -> tuple[int, int] | None:
 def _parse_line(line: Any) -> tuple[tuple[int, int], tuple[int, int], str] | None:
     """Normalize a counting-line spec into ((x1, y1), (x2, y2), line_id).
 
-    Accepts dicts, objects with ``pt1``/``pt2``/``line_id`` attributes, and
-    (pt1, pt2[, line_id]) sequences. Returns None for unsupported shapes so
-    ``draw()`` can skip them gracefully.
+    Accepts dicts, objects with ``point_a``/``point_b`` or ``pt1``/``pt2`` attributes,
+    and (pt1, pt2[, line_id]) sequences. Returns None for unsupported shapes.
     """
     if isinstance(line, dict):
-        pt1 = _as_point(line.get("pt1"))
-        pt2 = _as_point(line.get("pt2"))
-        line_id = str(line.get("line_id", DEFAULT_LINE_LABEL))
+        pt1 = _as_point(line.get("point_a", line.get("pt1")))
+        pt2 = _as_point(line.get("point_b", line.get("pt2")))
+        line_id = str(line.get("line_id", line.get("id", DEFAULT_LINE_LABEL)))
+    elif hasattr(line, "point_a") and hasattr(line, "point_b"):
+        pt1 = _as_point(line.point_a)
+        pt2 = _as_point(line.point_b)
+        line_id = str(getattr(line, "line_id", getattr(line, "id", DEFAULT_LINE_LABEL)))
     elif hasattr(line, "pt1") and hasattr(line, "pt2"):
         pt1 = _as_point(line.pt1)
         pt2 = _as_point(line.pt2)
@@ -292,22 +320,17 @@ class OpenCvVisualizer(IVisualizer):
                 lineType=cv2.LINE_AA,
             )
 
-    def update(self, *args: Any, **kwargs: Any) -> None:
-        """Observer callback (T07) — draws the latest pipeline state.
-
-        Accepts keyword args (``frame=``, ``tracks=``, ``lines=``, ``counters=``)
-        or the same four values positionally. Anything else raises TypeError so
-        mis-wiring fails loudly instead of silently doing nothing.
-        """
-        if "frame" in kwargs and "tracks" in kwargs:
-            self.draw(
-                kwargs["frame"],
-                kwargs.get("tracks", []),
-                kwargs.get("lines", []),
-                kwargs.get("counters", {}),
-            )
-            return
-        if len(args) == 4:
-            self.draw(args[0], args[1], args[2], args[3])
-            return
-        raise TypeError("update() expects (frame, tracks, lines, counters)")
+    def update(
+        self,
+        frame: np.ndarray,
+        tracks: list[Track] | None = None,
+        lines: list | None = None,
+        counters: dict | None = None,
+    ) -> np.ndarray:
+        """Observer callback conforming to T07 / T16 contract."""
+        return self.draw(
+            frame=frame,
+            tracks=tracks if tracks is not None else [],
+            lines=lines if lines is not None else [],
+            counters=counters if counters is not None else {},
+        )
