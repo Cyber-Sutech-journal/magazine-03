@@ -33,17 +33,3 @@ class CsvEventRepository(IEventRepository):
     def close(self) -> None:
         if not self.file.closed:
             self.file.close()
-
-
-class InMemoryEventRepository(IEventRepository):
-    def __init__(self):
-        self.events = []
-
-    def save(self, event: CrossingEvent) -> None:
-        self.events.append(event)
-
-    def flush(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
