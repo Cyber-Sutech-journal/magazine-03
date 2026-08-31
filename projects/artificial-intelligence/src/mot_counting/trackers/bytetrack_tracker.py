@@ -9,6 +9,8 @@ from mot_counting.interfaces.tracker import ITracker
 from mot_counting.types import Detection, Track
 
 
+# NOTE: torch is required because BYTETracker internally expects Results/Boxes
+# to expose PyTorch tensor interfaces (.xyxy, .xywh, .conf, .cls).
 class UltralyticsResultsMock:
     """Lightweight mock of Ultralytics Results/Boxes expected by BYTETracker."""
 
@@ -87,13 +89,7 @@ class ByteTrackWrapper(ITracker):
         frame_idx: int,
         frame: np.ndarray,
     ) -> list[Track]:
-        """Update tracker with detections from current frame.
-
-        Note:
-            The `frame` argument is required by the `ITracker` interface for
-            forward-compatibility with visual/appearance-based trackers (e.g., BoT-SORT).
-            It is intentionally unused by ByteTrack, which is purely motion-based.
-        """
+        """Update tracker with detections from current frame."""
         if detections:
             for det in detections:
                 self._class_names[det.class_id] = det.class_name
@@ -108,26 +104,32 @@ class ByteTrackWrapper(ITracker):
 
         results_mock = UltralyticsResultsMock(boxes_arr, scores_arr, class_ids_arr)
 
+        # frame is part of ITracker for BoT-SORT forward-compat; ByteTrack is
+        # motion-only and intentionally ignores it.
         tracks = self.tracker.update(results_mock, img=None)
         if len(tracks) == 0:
             return []
 
         out_tracks: list[Track] = []
+        # BYTETracker output layout: [x1, y1, x2, y2, track_id, score, class_id, idx]
         for t in tracks:
-            cls_id = int(t[5]) if len(t) > 5 else 0
-            cls_name = self._class_names.get(cls_id, "")
+            if len(t) < 7:
+                continue
 
-            # Extract valid positive score (Ultralytics byte_tracker format fallback)
-            score = 1.0
-            if len(t) > 6 and float(t[6]) > 0.0:
-                score = float(t[6])
-            elif len(t) > 4 and 0.0 < float(t[4]) <= 1.0:
-                score = float(t[4])
+            bbox = (float(t[0]), float(t[1]), float(t[2]), float(t[3]))
+            track_id = int(t[4])
+            score_val = float(t[5])
+            cls_id = int(t[6])
+
+            # NOTE: ByteTrack does not expose association indices, so class_name
+            # is resolved from the cumulative _class_names map.
+            cls_name = self._class_names.get(cls_id, "")
+            score = score_val if score_val > 0.0 else 1.0
 
             out_tracks.append(
                 Track(
-                    track_id=int(t[4]),
-                    bbox=tuple(t[:4]),
+                    track_id=track_id,
+                    bbox=bbox,
                     class_id=cls_id,
                     class_name=cls_name,
                     score=score,
