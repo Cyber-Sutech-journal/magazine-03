@@ -6,6 +6,11 @@ truth are CSV files. Both require `timestamp_seconds`, `class_name`, `direction`
 `track_id` and other detector, tracker, bounding-box, confidence, or video metadata. The evaluator
 does not require those prediction-only fields from ground truth.
 
+When CSV inputs are loaded, surrounding whitespace is removed, `class_name` is normalized to
+lowercase to match the repository's detector-label convention, and `direction` is normalized to
+uppercase before conversion to the `Direction` enum. Thus capitalization differences such as
+`Person` versus `person`, or `in` versus `IN`, do not create separate evaluation groups.
+
 ## Matching
 
 A prediction is eligible to match a ground-truth event only when `class_name`, `direction`, and
@@ -43,7 +48,8 @@ Metrics are calculated once over all events and separately for every
 `(line_id, class_name, direction)` group appearing in either input. With zero predictions,
 Precision is undefined; with zero GT events, Recall and relative/percentage counting error are
 undefined. F1 is undefined if Precision or Recall is undefined. No division by zero is performed.
-Undefined values are written and displayed as `N/A`.
+When Precision and Recall are both defined and equal to `0.0`, F1 is reported as `0.0`. Undefined
+values are written and displayed as `N/A`.
 
 ## Outputs
 

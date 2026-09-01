@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -275,8 +276,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the standalone evaluator."""
     args = _build_parser().parse_args(argv)
     tolerance_seconds = _resolve_tolerance(args.tolerance_seconds)
-    predictions = load_prediction_events(args.predictions)
-    ground_truths = load_ground_truth_events(args.ground_truth)
+    try:
+        predictions = load_prediction_events(args.predictions)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading prediction CSV: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        ground_truths = load_ground_truth_events(args.ground_truth)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error loading ground-truth CSV: {exc}", file=sys.stderr)
+        return 1
+
     result = evaluate_events(predictions, ground_truths, tolerance_seconds)
 
     output_dir = args.output_dir if args.output_dir is not None else args.predictions.parent

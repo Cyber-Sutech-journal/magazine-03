@@ -115,24 +115,24 @@ class EvaluationResult:
 
 def _parse_direction(raw: str) -> Direction:
     try:
-        return Direction(raw.strip())
+        return Direction(raw.strip().upper())
     except ValueError as exc:
         raise ValueError(f"Invalid direction {raw!r}; expected 'IN' or 'OUT'.") from exc
 
 
 def _row_to_event(row: dict[str, str], source_index: int) -> EvaluationEvent:
-    missing = [col for col in _CSV_REQUIRED_COLUMNS if not row.get(col, "").strip()]
+    missing = [col for col in _CSV_REQUIRED_COLUMNS if not (row.get(col) or "").strip()]
     if missing:
         cols = ", ".join(missing)
         raise ValueError(f"Row {source_index + 1} is missing required column(s): {cols}.")
 
-    frame_idx_raw = row.get("frame_idx", "").strip()
-    track_id_raw = row.get("track_id", "").strip()
-    class_id_raw = row.get("class_id", "").strip()
+    frame_idx_raw = (row.get("frame_idx") or "").strip()
+    track_id_raw = (row.get("track_id") or "").strip()
+    class_id_raw = (row.get("class_id") or "").strip()
 
     return EvaluationEvent(
         timestamp_seconds=float(row["timestamp_seconds"]),
-        class_name=row["class_name"].strip(),
+        class_name=row["class_name"].strip().lower(),
         direction=_parse_direction(row["direction"]),
         line_id=row["line_id"].strip(),
         source_index=source_index,

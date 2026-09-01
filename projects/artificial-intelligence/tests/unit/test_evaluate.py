@@ -204,6 +204,22 @@ def test_precision_recall_f1_on_hand_verified_counts() -> None:
     assert metrics.f1 == pytest.approx(2 * 0.5 * (2 / 3) / (0.5 + 2 / 3))
 
 
+def test_f1_is_zero_when_precision_and_recall_are_defined_and_zero() -> None:
+    result = evaluate_events(
+        [_pred(1.0, 0)],
+        [_gt(10.0, 0)],
+        tolerance_seconds=1.0,
+    )
+    metrics = result.overall_metrics
+
+    assert metrics.tp == 0
+    assert metrics.fp == 1
+    assert metrics.fn == 1
+    assert metrics.precision == 0.0
+    assert metrics.recall == 0.0
+    assert metrics.f1 == 0.0
+
+
 def test_greedy_trap_preserves_maximum_cardinality() -> None:
     """Nearest-neighbour greedy matching can consume the only GT a later prediction can use."""
     ground_truths = [_gt(0.0, 0), _gt(1.0, 1)]
@@ -314,6 +330,37 @@ def test_prediction_csv_schema_round_trip(tmp_path: Path) -> None:
     assert ground_truths[0].frame_idx == 10
 
 
+def test_csv_loader_normalizes_class_name_and_direction_case(tmp_path: Path) -> None:
+    predictions_path = tmp_path / "predictions.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    header = "frame_idx,timestamp_seconds,class_name,direction,line_id"
+    _write_csv(predictions_path, header, ["10,1.0,Person,in,main_line"])
+    _write_csv(ground_truth_path, header, ["10,1.0,PERSON,In,main_line"])
+
+    predictions = load_prediction_events(predictions_path)
+    ground_truths = load_ground_truth_events(ground_truth_path)
+    result = evaluate_events(predictions, ground_truths, tolerance_seconds=0.0)
+
+    assert predictions[0].class_name == "person"
+    assert ground_truths[0].class_name == "person"
+    assert predictions[0].direction is Direction.IN
+    assert ground_truths[0].direction is Direction.IN
+    assert result.overall_metrics.tp == 1
+    assert result.overall_metrics.fp == 0
+    assert result.overall_metrics.fn == 0
+
+
+def test_ragged_csv_row_reports_missing_required_column(tmp_path: Path) -> None:
+    csv_path = tmp_path / "ragged.csv"
+    csv_path.write_text(
+        "timestamp_seconds,class_name,direction,line_id\n1.0,person,IN\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"missing required column\(s\): line_id"):
+        load_prediction_events(csv_path)
+
+
 def _write_csv(path: Path, header: str, rows: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(header + "\n" + "\n".join(rows) + "\n", encoding="utf-8")
@@ -374,6 +421,57 @@ def test_cli_uses_explicit_tolerance(tmp_path: Path) -> None:
     assert exit_code == 0
     overall = _read_csv(output_dir / "evaluation_summary.csv")[0]
     assert (overall["tp"], overall["fp"], overall["fn"]) == ("0", "1", "1")
+
+
+def test_cli_missing_prediction_csv_returns_clean_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    predictions_path = tmp_path / "missing.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    header = "frame_idx,timestamp_seconds,class_name,direction,line_id"
+    _write_csv(ground_truth_path, header, ["9,1.0,person,IN,main_line"])
+
+    exit_code = evaluate_cli.main(
+        [
+            "--predictions",
+            str(predictions_path),
+            "--ground-truth",
+            str(ground_truth_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code != 0
+    assert captured.out == ""
+    assert "Error loading prediction CSV:" in captured.err
+    assert "Event CSV not found:" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_malformed_ground_truth_csv_returns_clean_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    predictions_path = tmp_path / "predictions.csv"
+    ground_truth_path = tmp_path / "ground_truth.csv"
+    header = "frame_idx,timestamp_seconds,class_name,direction,line_id"
+    _write_csv(predictions_path, header, ["10,1.0,person,IN,main_line"])
+    _write_csv(ground_truth_path, header, ["9,1.0,person,sideways,main_line"])
+
+    exit_code = evaluate_cli.main(
+        [
+            "--predictions",
+            str(predictions_path),
+            "--ground-truth",
+            str(ground_truth_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code != 0
+    assert captured.out == ""
+    assert "Error loading ground-truth CSV:" in captured.err
+    assert "Invalid direction 'sideways'" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_cli_omitted_tolerance_loads_project_default_from_any_cwd(
