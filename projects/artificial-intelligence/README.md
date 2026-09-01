@@ -135,9 +135,15 @@ python scripts/run_pipeline.py --config configs/default.yaml --video path/to/vid
 # Evaluate against ground truth
 python scripts/evaluate.py \
     --predictions outputs/events.csv \
-    --ground-truth data/ground_truth.csv \
-    --tolerance-seconds 1.0
+    --ground-truth data/ground_truth.csv
 ```
+
+`--tolerance-seconds` optionally overrides the inclusive matching tolerance. When omitted, the
+evaluator loads `evaluation.matching_tolerance_seconds` from the project-local
+`configs/default.yaml`, even when invoked from another working directory. Use `--output-dir` to
+choose where `evaluation_summary.csv` and `evaluation_matches.csv` are written; without it, the
+artifacts are written alongside the predictions CSV. See
+[`docs/evaluation-protocol.md`](docs/evaluation-protocol.md) for matching and metric definitions.
 
 **Docker (CPU):**
 
