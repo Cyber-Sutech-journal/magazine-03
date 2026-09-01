@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -7,6 +8,8 @@ from ultralytics.trackers.byte_tracker import BYTETracker
 
 from mot_counting.interfaces.tracker import ITracker
 from mot_counting.types import Detection, Track
+
+logger = logging.getLogger(__name__)
 
 
 # NOTE: torch is required because BYTETracker internally expects Results/Boxes
@@ -49,12 +52,8 @@ class ByteTrackArgs(SimpleNamespace):
     """Dynamic configuration container for BYTETracker args."""
 
     def __getattr__(self, name: str) -> Any:
-        defaults = {
-            "track_high_thresh": getattr(self, "track_thresh", 0.5),
-            "track_low_thresh": 0.1,
-            "new_track_thresh": getattr(self, "track_thresh", 0.5) + 0.1,
-        }
-        return defaults.get(name, 0.0)
+        """Provide defaults for implicit BYTETracker attributes such as mot20."""
+        return 0.0
 
 
 class ByteTrackWrapper(ITracker):
@@ -64,10 +63,10 @@ class ByteTrackWrapper(ITracker):
 
     def __init__(
         self,
+        frame_rate: int = 30,
         track_thresh: float = 0.5,
         match_thresh: float = 0.8,
         track_buffer: int = 30,
-        frame_rate: int = 30,
         fuse_score: bool = True,
     ) -> None:
         self.args = ByteTrackArgs(
@@ -94,15 +93,28 @@ class ByteTrackWrapper(ITracker):
             for det in detections:
                 self._class_names[det.class_id] = det.class_name
 
-            boxes_arr = np.array([det.xyxy for det in detections], dtype=np.float32)
-            scores_arr = np.array([det.confidence for det in detections], dtype=np.float32)
-            class_ids_arr = np.array([det.class_id for det in detections], dtype=np.int32)
+            boxes_arr = np.array(
+                [det.xyxy for det in detections],
+                dtype=np.float32,
+            )
+            scores_arr = np.array(
+                [det.confidence for det in detections],
+                dtype=np.float32,
+            )
+            class_ids_arr = np.array(
+                [det.class_id for det in detections],
+                dtype=np.int32,
+            )
         else:
             boxes_arr = np.empty((0, 4), dtype=np.float32)
             scores_arr = np.empty((0,), dtype=np.float32)
             class_ids_arr = np.empty((0,), dtype=np.int32)
 
-        results_mock = UltralyticsResultsMock(boxes_arr, scores_arr, class_ids_arr)
+        results_mock = UltralyticsResultsMock(
+            boxes_arr,
+            scores_arr,
+            class_ids_arr,
+        )
 
         # frame is part of ITracker for BoT-SORT forward-compat; ByteTrack is
         # motion-only and intentionally ignores it.
@@ -111,12 +123,24 @@ class ByteTrackWrapper(ITracker):
             return []
 
         out_tracks: list[Track] = []
-        # BYTETracker output layout: [x1, y1, x2, y2, track_id, score, class_id, idx]
+        # BYTETracker output layout:
+        # [x1, y1, x2, y2, track_id, score, class_id, idx]
         for t in tracks:
             if len(t) < 7:
+                logger.warning(
+                    "Skipping malformed BYTETracker output at frame %d: "
+                    "expected at least 7 values, got %d",
+                    frame_idx,
+                    len(t),
+                )
                 continue
 
-            bbox = (float(t[0]), float(t[1]), float(t[2]), float(t[3]))
+            bbox = (
+                float(t[0]),
+                float(t[1]),
+                float(t[2]),
+                float(t[3]),
+            )
             track_id = int(t[4])
             score_val = float(t[5])
             cls_id = int(t[6])
@@ -124,7 +148,7 @@ class ByteTrackWrapper(ITracker):
             # NOTE: ByteTrack does not expose association indices, so class_name
             # is resolved from the cumulative _class_names map.
             cls_name = self._class_names.get(cls_id, "")
-            score = score_val if score_val > 0.0 else 1.0
+            score = score_val
 
             out_tracks.append(
                 Track(
