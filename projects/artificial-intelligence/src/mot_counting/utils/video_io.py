@@ -60,7 +60,7 @@ class OpenCvFrameSource(IFrameSource):
 
         Returns the FPS reported by cv2.CAP_PROP_FPS. If the reported value
         is non-positive or non-finite (NaN, inf), falls back to the documented
-        project baseline of ``_DEFAULT_FPS`` (30.0).
+        project baseline of ``DEFAULT_FPS`` (30.0).
 
         Note:
             Downstream components rely on FPS to convert seconds-based timeouts
@@ -74,11 +74,18 @@ class OpenCvFrameSource(IFrameSource):
         return fps
 
     def get_frame_size(self) -> tuple[int, int]:
-        """Return the video dimensions as ``(width, height)`` in pixels."""
-        width = int(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        """Return the video dimensions as ``(width, height)`` in pixels.
 
-        return width, height
+        Raises:
+            RuntimeError: If the video reports invalid frame dimensions.
+        """
+        width = float(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = float(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        if not np.isfinite(width) or not np.isfinite(height) or width <= 0 or height <= 0:
+            raise RuntimeError(f"Invalid video frame dimensions: width={width}, height={height}")
+
+        return int(width), int(height)
 
     def release(self) -> None:
         """Release the underlying OpenCV video-capture resource."""

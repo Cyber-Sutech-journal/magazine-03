@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 import pytest
 
-from mot_counting.utils.video_io import IFrameSource, OpenCvFrameSource
+from mot_counting.interfaces.frame_source import IFrameSource
+from mot_counting.utils.video_io import OpenCvFrameSource
 
 
 def create_synthetic_video(
@@ -79,6 +80,8 @@ def test_reads_frames_and_returns_none_at_end(tmp_path: Path) -> None:
             assert frame.dtype == np.uint8
 
             frames.append(frame)
+
+        assert not np.array_equal(frames[0], frames[1])
 
         success, frame = source.read()
 
