@@ -1,18 +1,6 @@
-"""OpenCV-based visualizer implementing IVisualizer interface.
-
-Draws annotated output frames: per-track bounding boxes with labels,
-configured counting lines with identifiers, and live per-line counters
-overlaid as a HUD card (§7.6).
-
-Coloring strategy: consistent per-class colors (CLASS_COLORS) — clearer for
-demo videos; unknown classes fall back to a deterministic track-id palette.
-
-The input frame is never mutated: ``draw()`` always returns a fresh copy.
-"""
+"""OpenCV-based visualizer for bounding boxes, tracking IDs, lines, and counter overlays."""
 
 from __future__ import annotations
-
-from typing import Any
 
 import cv2
 import numpy as np
@@ -20,305 +8,242 @@ import numpy as np
 from mot_counting.interfaces.visualizer import IVisualizer
 from mot_counting.types import Track
 
-# ==============================================================================
-# Drawing constants (§12.5) — no magic numbers inside methods.
-# ==============================================================================
-FONT_FACE = cv2.FONT_HERSHEY_SIMPLEX
-FONT_SCALE = 0.5
-FONT_THICKNESS = 1
-TEXT_PADDING = 4  # horizontal padding around label text
-LABEL_HEIGHT_OFFSET = 5  # vertical gap between box edge and text chip
-
-BOX_THICKNESS = 2
-LINE_THICKNESS = 2
-
-COLOR_TEXT = (255, 255, 255)  # primary HUD text (white)
-COLOR_TEXT_DARK = (0, 0, 0)  # text on top of solid color chips (black)
-COLOR_LINE_DEFAULT = (0, 0, 255)  # counting lines (red)
-COLOR_OVERLAY_BG = (20, 20, 20)  # HUD card background (dark gray)
-OVERLAY_ALPHA = 0.6  # HUD card opacity (0..1)
-
-OVERLAY_MARGIN = 10
-OVERLAY_LINE_HEIGHT = 20
-OVERLAY_BOX_WIDTH = 240
-OVERLAY_HEADER_PAD = 15
-OVERLAY_TEXT_OFFSET = 8  # left indent of text inside the HUD card
-OVERLAY_INDENT = "  "  # indentation for per-line nested counters
-
-DEFAULT_LINE_LABEL = "line"
-
-# Consistent per-class palette (BGR) — aligned with common COCO demo classes.
-CLASS_COLORS: dict[int, tuple[int, int, int]] = {
-    0: (0, 255, 0),  # person
-    1: (255, 128, 0),  # bicycle
-    2: (0, 255, 255),  # car
-    3: (255, 0, 255),  # motorcycle
-    4: (0, 165, 255),  # bus
-    5: (255, 255, 0),  # truck
+# Color palette mapped by canonical class name with fallback to class_id
+CLASS_COLORS: dict[str | int, tuple[int, int, int]] = {
+    "person": (0, 255, 0),  # Green
+    "car": (255, 0, 0),  # Blue
+    "bicycle": (0, 255, 255),  # Yellow
+    "motorcycle": (255, 255, 0),  # Cyan
+    "bus": (0, 165, 255),  # Orange
+    "truck": (128, 0, 128),  # Purple
 }
 
-# Deterministic fallback palette for unknown classes (cycled by track_id).
-TRACK_ID_PALETTE: tuple[tuple[int, int, int], ...] = (
+DEFAULT_PALETTE = [
+    (0, 255, 0),
     (255, 0, 0),
-    (0, 128, 255),
+    (0, 0, 255),
+    (0, 255, 255),
     (255, 255, 0),
     (255, 0, 255),
-    (0, 255, 128),
-    (128, 0, 255),
-    (0, 200, 200),
-    (200, 200, 0),
-)
-
-__all__ = ["OpenCvVisualizer", "format_counters_overlay", "get_color_for_track"]
+    (0, 165, 255),
+    (128, 0, 128),
+]
 
 
-# ==============================================================================
-# Pure helpers (unit-testable in isolation — recommended by T16).
-# ==============================================================================
+def _get_color(class_name: str | None = None, class_id: int | None = None) -> tuple[int, int, int]:
+    """Retrieve BGR color prioritising class_name, falling back to class_id, then palette."""
+    if class_name is not None:
+        normalized_name = str(class_name).strip().lower()
+        if normalized_name in CLASS_COLORS:
+            return CLASS_COLORS[normalized_name]
+
+    if class_id is not None:
+        if class_id in CLASS_COLORS:
+            return CLASS_COLORS[class_id]
+        return DEFAULT_PALETTE[class_id % len(DEFAULT_PALETTE)]
+
+    return (0, 255, 0)
 
 
-def _count(direction_counts: dict[str, Any], direction: str) -> int:
-    """Extract a count from a direction dict, tolerating 'in'/'IN'/'In' keys."""
-    for key in (direction, direction.upper(), direction.lower(), direction.capitalize()):
-        if key in direction_counts:
-            return int(direction_counts[key])
-    return 0
+def _parse_line(line: object) -> tuple[tuple[int, int], tuple[int, int], str] | None:
+    """Extract (point_a, point_b, line_id) from dicts, tuples, or objects."""
+    if isinstance(line, dict):
+        pt_a = line.get("point_a") or line.get("pt1")
+        pt_b = line.get("point_b") or line.get("pt2")
+        line_id = str(line.get("line_id", "Line"))
+        if pt_a is not None and pt_b is not None:
+            return (tuple(pt_a), tuple(pt_b), line_id)
+        return None
+
+    if hasattr(line, "point_a") and hasattr(line, "point_b"):
+        pt_a = line.point_a
+        pt_b = line.point_b
+        line_id = str(getattr(line, "line_id", "Line"))
+        return (tuple(pt_a), tuple(pt_b), line_id)
+
+    if isinstance(line, (tuple, list)) and len(line) >= 2:
+        pt_a = line[0]
+        pt_b = line[1]
+        line_id = str(line[2]) if len(line) > 2 else "Line"
+        return (tuple(pt_a), tuple(pt_b), line_id)
+
+    return None
 
 
-def format_counters_overlay(counters: dict[Any, Any]) -> list[str]:
-    """Format a counters dict into human-readable HUD lines.
+def format_counters_overlay(counters: dict) -> list[str]:
+    """Format counting dictionary into readable text overlay lines.
 
-    Supports three shapes:
-    * Canonical tuple: {(class_name, line_id, direction): count}
-    * Flat dict:       {"person": {"in": 2, "out": 1}}
-    * Nested dict:     {"Gate-1": {"person": {"in": 2, ...}}}
+    Handles canonical Spec tuple keys: (class_name, line_id, direction),
+    multi-line nested dicts: {line_id: {class_name: {in: x, out: y}}},
+    and flat dicts: {class_name: {in: x, out: y}}.
     """
     if not counters:
         return []
 
     lines: list[str] = []
-    first_key = next(iter(counters.keys()))
 
-    # Case 1: Canonical Spec §7.4 tuple-key mapping: (class_name, line_id, direction) -> count
-    if isinstance(first_key, tuple) and len(first_key) == 3:
+    # Check if keys are canonical tuples: (class_name, line_id, direction)
+    first_key = next(iter(counters))
+    if isinstance(first_key, tuple) and len(first_key) >= 3:
+        # Group by line_id -> class_name -> direction
         grouped: dict[str, dict[str, dict[str, int]]] = {}
-        for (cls_name, line_id, direction), count in counters.items():
-            dir_str = str(getattr(direction, "value", direction)).lower()
-            cls_str = str(cls_name)
-            lid_str = str(line_id)
-            grouped.setdefault(lid_str, {}).setdefault(cls_str, {})[dir_str] = int(count)
+        for (c_name, l_id, direction), count in counters.items():
+            l_id_str = str(l_id)
+            c_name_str = str(c_name).capitalize()
+            dir_str = str(direction).upper()
+            if l_id_str not in grouped:
+                grouped[l_id_str] = {}
+            if c_name_str not in grouped[l_id_str]:
+                grouped[l_id_str][c_name_str] = {"IN": 0, "OUT": 0}
+            grouped[l_id_str][c_name_str][dir_str] = count
 
-        for line_id, class_map in sorted(grouped.items()):
-            lines.append(f"[{line_id}]")
-            for cls_name, directions in sorted(class_map.items()):
-                lines.append(
-                    f"{OVERLAY_INDENT}{cls_name.capitalize()} "
-                    f"IN: {_count(directions, 'in')} OUT: {_count(directions, 'out')}"
-                )
+        for l_id_str in sorted(grouped.keys()):
+            lines.append(f"[{l_id_str}]")
+            for c_name_str in sorted(grouped[l_id_str].keys()):
+                in_cnt = grouped[l_id_str][c_name_str].get("IN", 0)
+                out_cnt = grouped[l_id_str][c_name_str].get("OUT", 0)
+                lines.append(f"  {c_name_str} IN: {in_cnt} OUT: {out_cnt}")
         return lines
 
-    # Case 2 & 3: Flat or nested dictionary
-    for section, value in counters.items():
-        if isinstance(value, dict) and value and all(isinstance(v, dict) for v in value.values()):
-            # Nested shape: line_id -> class -> {in/out}
-            lines.append(f"[{section}]")
-            for cls_name, directions in value.items():
-                lines.append(
-                    f"{OVERLAY_INDENT}{cls_name.capitalize()} "
-                    f"IN: {_count(directions, 'in')} OUT: {_count(directions, 'out')}"
-                )
-        elif isinstance(value, dict):
-            # Flat shape: class -> {in/out}
-            lines.append(
-                f"{section.capitalize()} IN: {_count(value, 'in')} OUT: {_count(value, 'out')}"
-            )
-        else:
-            # Scalar fallback: "key: value"
-            lines.append(f"{section}: {value}")
+    # Check for nested line dictionary: {line_id: {class_name: {...}}}
+    if isinstance(first_key, str) and isinstance(counters[first_key], dict):
+        sub_first = next(iter(counters[first_key].values()), None)
+        if isinstance(sub_first, dict):
+            for l_id, sub_dict in counters.items():
+                lines.append(f"[{l_id}]")
+                for c_name, dirs in sub_dict.items():
+                    in_cnt = dirs.get("in", dirs.get("IN", 0))
+                    out_cnt = dirs.get("out", dirs.get("OUT", 0))
+                    lines.append(f"  {str(c_name).capitalize()} IN: {in_cnt} OUT: {out_cnt}")
+            return lines
+
+        # Flat dict: {class_name: {in: x, out: y}}
+        for c_name, dirs in counters.items():
+            in_cnt = dirs.get("in", dirs.get("IN", 0))
+            out_cnt = dirs.get("out", dirs.get("OUT", 0))
+            lines.append(f"{str(c_name).capitalize()} IN: {in_cnt} OUT: {out_cnt}")
+        return lines
+
+    # Primitive scalar key-value fallback
+    for k, v in counters.items():
+        lines.append(f"{k}: {v}")
+
     return lines
 
 
-def get_color_for_track(track: Track) -> tuple[int, int, int]:
-    """Pick a stable BGR color for a track.
-
-    Primary key: ``class_id`` — consistent per-class coloring (demo-friendly).
-    Fallback: deterministic palette indexed by ``track_id`` — stable across
-    frames, no RNG, no global state.
-    """
-    class_id = getattr(track, "class_id", None)
-    if class_id in CLASS_COLORS:
-        return CLASS_COLORS[class_id]
-    track_id = getattr(track, "track_id", 0)
-    return TRACK_ID_PALETTE[int(track_id) % len(TRACK_ID_PALETTE)]
-
-
-def _as_point(value: Any) -> tuple[int, int] | None:
-    """Convert a 2D coordinate into an int tuple, or None if malformed."""
-    try:
-        x, y = value
-        return int(round(x)), int(round(y))
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_line(line: Any) -> tuple[tuple[int, int], tuple[int, int], str] | None:
-    """Normalize a counting-line spec into ((x1, y1), (x2, y2), line_id).
-
-    Accepts dicts, objects with ``point_a``/``point_b`` or ``pt1``/``pt2`` attributes,
-    and (pt1, pt2[, line_id]) sequences. Returns None for unsupported shapes.
-    """
-    if isinstance(line, dict):
-        pt1 = _as_point(line.get("point_a", line.get("pt1")))
-        pt2 = _as_point(line.get("point_b", line.get("pt2")))
-        line_id = str(line.get("line_id", line.get("id", DEFAULT_LINE_LABEL)))
-    elif hasattr(line, "point_a") and hasattr(line, "point_b"):
-        pt1 = _as_point(line.point_a)
-        pt2 = _as_point(line.point_b)
-        line_id = str(getattr(line, "line_id", getattr(line, "id", DEFAULT_LINE_LABEL)))
-    elif hasattr(line, "pt1") and hasattr(line, "pt2"):
-        pt1 = _as_point(line.pt1)
-        pt2 = _as_point(line.pt2)
-        line_id = str(getattr(line, "line_id", getattr(line, "id", DEFAULT_LINE_LABEL)))
-    elif isinstance(line, (tuple, list)) and len(line) >= 2:
-        pt1 = _as_point(line[0])
-        pt2 = _as_point(line[1])
-        line_id = str(line[2]) if len(line) > 2 else DEFAULT_LINE_LABEL
-    else:
-        return None
-
-    if pt1 is None or pt2 is None:
-        return None
-    return pt1, pt2, line_id
-
-
-# ==============================================================================
-# Concrete visualizer
-# ==============================================================================
-
-
 class OpenCvVisualizer(IVisualizer):
-    """Renders annotated frames (boxes, labels, lines, counters) with OpenCV."""
+    """Visualizes tracked objects, lines, and counting statistics using OpenCV."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        line_color: tuple[int, int, int] = (0, 255, 255),
+        text_color: tuple[int, int, int] = (255, 255, 255),
+        line_thickness: int = 2,
+        font_scale: float = 0.6,
+    ) -> None:
+        self.line_color = line_color
+        self.text_color = text_color
+        self.line_thickness = line_thickness
+        self.font_scale = font_scale
         self.last_annotated_frame: np.ndarray | None = None
 
     def draw(
         self,
         frame: np.ndarray,
-        tracks: list[Track],
-        lines: list,
-        counters: dict,
+        tracks: list[Track] | None = None,
+        lines: list | None = None,
+        counters: dict | None = None,
     ) -> np.ndarray:
-        """Annotate *frame* and return a new copy.
-
-        Documented contract: the input frame is **never mutated** — callers
-        can safely reuse it after the call.
-        """
+        """Render tracks, counting lines, and counter overlay on a copy of the frame."""
         annotated = frame.copy()
-        self._draw_lines(annotated, lines)
-        self._draw_tracks(annotated, tracks)
-        self._draw_counters(annotated, counters)
+
+        # 1. Draw counting lines
+        if lines:
+            for line_spec in lines:
+                parsed = _parse_line(line_spec)
+                if parsed is None:
+                    continue
+                pt_a, pt_b, line_id = parsed
+                cv2.line(annotated, pt_a, pt_b, self.line_color, self.line_thickness)
+                mid_x = (pt_a[0] + pt_b[0]) // 2
+                mid_y = (pt_a[1] + pt_b[1]) // 2
+                cv2.putText(
+                    annotated,
+                    line_id,
+                    (mid_x + 5, mid_y - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    self.line_color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        # 2. Draw tracks (bounding boxes and IDs)
+        if tracks:
+            for track in tracks:
+                x1, y1, x2, y2 = map(int, track.bbox)
+                color = _get_color(
+                    getattr(track, "class_name", None), getattr(track, "class_id", None)
+                )
+
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+
+                label_parts = [f"ID:{track.track_id}"]
+                if getattr(track, "class_name", None):
+                    label_parts.append(str(track.class_name))
+                if getattr(track, "score", None) is not None:
+                    label_parts.append(f"{track.score:.2f}")
+
+                label = " ".join(label_parts)
+                (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                text_y = max(y1 - 5, th + 5)
+                cv2.rectangle(
+                    annotated,
+                    (x1, text_y - th - 3),
+                    (x1 + tw + 2, text_y + baseline - 1),
+                    color,
+                    -1,
+                )
+                cv2.putText(
+                    annotated,
+                    label,
+                    (x1 + 1, text_y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        # 3. Draw counters overlay in the top-left corner
+        if counters:
+            overlay_lines = format_counters_overlay(counters)
+            y_offset = 25
+            for line_txt in overlay_lines:
+                cv2.putText(
+                    annotated,
+                    line_txt,
+                    (10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    self.font_scale,
+                    (0, 0, 0),
+                    3,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    annotated,
+                    line_txt,
+                    (10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    self.font_scale,
+                    self.text_color,
+                    1,
+                    cv2.LINE_AA,
+                )
+                y_offset += int(25 * self.font_scale / 0.6)
+
         self.last_annotated_frame = annotated
         return annotated
-
-    def _draw_tracks(self, frame: np.ndarray, tracks: list[Track]) -> None:
-        """Draw bounding boxes + class/track-id label chips."""
-        for track in tracks:
-            bbox = track.bbox
-            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-            if x2 <= x1 or y2 <= y1:  # skip degenerate boxes
-                continue
-
-            color = get_color_for_track(track)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, BOX_THICKNESS)
-
-            class_name = getattr(track, "class_name", None)
-            if not class_name:
-                class_name = f"class_{getattr(track, 'class_id', 0)}"
-            label = f"{class_name} #{getattr(track, 'track_id', 0)}"
-
-            (text_w, text_h), baseline = cv2.getTextSize(
-                label, FONT_FACE, FONT_SCALE, FONT_THICKNESS
-            )
-            chip_y = max(y1, text_h + LABEL_HEIGHT_OFFSET + baseline)
-            chip_top = chip_y - text_h - LABEL_HEIGHT_OFFSET
-
-            # Solid color chip behind the text for readability
-            cv2.rectangle(
-                frame,
-                (x1, chip_top),
-                (x1 + text_w + 2 * TEXT_PADDING, chip_y + baseline),
-                color,
-                thickness=cv2.FILLED,
-            )
-            cv2.putText(
-                frame,
-                label,
-                (x1 + TEXT_PADDING, chip_y),
-                FONT_FACE,
-                FONT_SCALE,
-                COLOR_TEXT_DARK,
-                FONT_THICKNESS,
-                lineType=cv2.LINE_AA,
-            )
-
-    def _draw_lines(self, frame: np.ndarray, lines: list) -> None:
-        """Draw every configured counting line with its line_id label."""
-        for raw_line in lines:
-            parsed = _parse_line(raw_line)
-            if parsed is None:
-                continue
-            (pt1, pt2, line_id) = parsed
-
-            cv2.line(
-                frame,
-                pt1,
-                pt2,
-                COLOR_LINE_DEFAULT,
-                LINE_THICKNESS,
-                lineType=cv2.LINE_AA,
-            )
-
-            mid = ((pt1[0] + pt2[0]) // 2, (pt1[1] + pt2[1]) // 2)
-            cv2.putText(
-                frame,
-                f"Line: {line_id}",
-                (mid[0] + TEXT_PADDING, mid[1] - TEXT_PADDING),
-                FONT_FACE,
-                FONT_SCALE,
-                COLOR_LINE_DEFAULT,
-                FONT_THICKNESS,
-                lineType=cv2.LINE_AA,
-            )
-
-    def _draw_counters(self, frame: np.ndarray, counters: dict) -> None:
-        """Render a semi-transparent HUD card with live per-line counts."""
-        overlay_lines = format_counters_overlay(counters)
-        if not overlay_lines:
-            return
-
-        box_w = OVERLAY_BOX_WIDTH
-        box_h = len(overlay_lines) * OVERLAY_LINE_HEIGHT + OVERLAY_HEADER_PAD
-        top_left = (OVERLAY_MARGIN, OVERLAY_MARGIN)
-        bottom_right = (OVERLAY_MARGIN + box_w, OVERLAY_MARGIN + box_h)
-
-        # Semi-transparent background card (60% opacity)
-        card = frame.copy()
-        cv2.rectangle(card, top_left, bottom_right, COLOR_OVERLAY_BG, thickness=cv2.FILLED)
-        cv2.addWeighted(card, OVERLAY_ALPHA, frame, 1.0 - OVERLAY_ALPHA, 0, frame)
-
-        for i, text in enumerate(overlay_lines):
-            y = OVERLAY_MARGIN + OVERLAY_LINE_HEIGHT + i * OVERLAY_LINE_HEIGHT
-            cv2.putText(
-                frame,
-                text,
-                (OVERLAY_MARGIN + OVERLAY_TEXT_OFFSET, y),
-                FONT_FACE,
-                FONT_SCALE,
-                COLOR_TEXT,
-                FONT_THICKNESS,
-                lineType=cv2.LINE_AA,
-            )
 
     def update(
         self,
@@ -326,9 +251,9 @@ class OpenCvVisualizer(IVisualizer):
         tracks: list[Track] | None = None,
         lines: list | None = None,
         counters: dict | None = None,
-    ) -> np.ndarray:
-        """Observer callback conforming to T07 / T16 contract."""
-        return self.draw(
+    ) -> None:
+        """Observer callback; performs rendering and stores output in self.last_annotated_frame."""
+        self.draw(
             frame=frame,
             tracks=tracks if tracks is not None else [],
             lines=lines if lines is not None else [],
