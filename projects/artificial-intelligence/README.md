@@ -181,14 +181,16 @@ To prevent frame drift and codec decoding inaccuracies (especially on inter-fram
 **Linux / macOS (Bash):**
 ```bash
 python ./scripts/annotate_ground_truth.py \
-  --video "./path/to/clip.mp4" \
-  --output "./path/to/ground_truth.csv"
+ --video "./path/to/clip.mp4" \
+ --output "./path/to/ground_truth.csv" 
+```
 
 **Windows (PowerShell):**
 ```powershell
 python .\scripts\annotate_ground_truth.py `
 --video ".\path\to\clip.mp4" `
---output ".\path\to\ground_truth.csv"
+--output ".\path\to\ground_truth.csv" 
+```
 
 ### Keyboard controls
 | Key | Action |

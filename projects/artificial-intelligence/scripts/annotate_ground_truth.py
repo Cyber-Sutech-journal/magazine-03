@@ -196,7 +196,7 @@ def run_annotation(
 
     fps = float(capture.get(cv2.CAP_PROP_FPS))
 
-    if fps is None or fps <= 0 or not isinstance(fps, (int, float)):
+    if fps <= 0:
         logger.warning(
             "Invalid or zero FPS (%s) reported by video container. Falling back to default: %.1f FPS",
             fps,
@@ -248,10 +248,10 @@ def run_annotation(
 
             action = normalize_key(key)
 
-            if action in ("q", "\x1b", 27):
+            if action in ("q", "\x1b"):
                 break
 
-            if action in (" ", ord(" ")):
+            if action == " ":
                 playing = not playing
                 continue
 
@@ -266,10 +266,11 @@ def run_annotation(
                 continue
 
             if action == "m":
+                was_playing = playing
                 playing = False
                 print(f"\nMarking crossing at frame {current_idx}")
                 details = ask_crossing_details()
-                playing = True
+                playing = was_playing
 
                 if details is not None:
                     class_name, direction, line_id = details
