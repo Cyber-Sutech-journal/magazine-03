@@ -19,6 +19,10 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import cv2
 
 from mot_counting.config import AppConfig
 from mot_counting.interfaces.crossing import ICrossingLogic
@@ -82,6 +86,7 @@ class PipelineController:
         event_repository: IEventRepository,
         visualizer: IVisualizer,
         subject: Subject,
+        video_writer: cv2.VideoWriter | None = None,
     ) -> None:
         """Initialise the controller with all pipeline dependencies.
 
@@ -94,6 +99,9 @@ class PipelineController:
             event_repository: Crossing-event persistence (``IEventRepository``).
             visualizer: Frame annotator (``IVisualizer``).
             subject: Observer subject for Logger/Visualizer side effects.
+            video_writer: Optional ``cv2.VideoWriter`` for annotated output video.
+                When provided, ``visualizer.draw()`` is called each frame and
+                the result is written here.  Released in :meth:`cleanup`.
         """
         self._config = config
         self._frame_source = frame_source
@@ -103,6 +111,7 @@ class PipelineController:
         self._event_repository = event_repository
         self._visualizer = visualizer
         self._subject = subject
+        self._video_writer = video_writer
 
         self._stop_requested: bool = False
         self._stats: RunStats = RunStats()
@@ -137,8 +146,9 @@ class PipelineController:
     def cleanup(self) -> None:
         """Release all resources regardless of how the loop exited.
 
-        Calls ``IFrameSource.release()`` and ``IEventRepository.flush()`` /
-        ``IEventRepository.close()`` in a best-effort manner.
+        Calls ``IFrameSource.release()``, ``IEventRepository.flush()`` /
+        ``IEventRepository.close()``, and ``cv2.VideoWriter.release()`` in a
+        best-effort manner.
         """
         try:
             self._frame_source.release()
@@ -149,6 +159,11 @@ class PipelineController:
             self._event_repository.close()
         except Exception:
             logger.exception("Error flushing / closing event repository during cleanup.")
+        if self._video_writer is not None:
+            try:
+                self._video_writer.release()
+            except Exception:
+                logger.exception("Error releasing video writer during cleanup.")
 
     def run(self) -> None:
         """Execute the full video analytics pipeline.
@@ -251,6 +266,19 @@ class PipelineController:
                 events=events,
                 counters=self._crossing_logic.get_counters(),
             )
+
+            # Visualize and write annotated frame to output video if wired.
+            if self._video_writer is not None:
+                import numpy as np
+
+                annotated = self._visualizer.draw(
+                    frame=frame,
+                    tracks=tracks,
+                    lines=self._config.lines,
+                    counters=self._crossing_logic.get_counters(),
+                )
+                if isinstance(annotated, np.ndarray):
+                    self._video_writer.write(annotated)
 
             self._stats.frames_processed += 1
             frame_idx += 1

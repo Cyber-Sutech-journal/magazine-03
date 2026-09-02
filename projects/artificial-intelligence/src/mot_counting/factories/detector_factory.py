@@ -72,17 +72,13 @@ class DetectorFactory:
             )
 
         if model_variant.startswith("yolo26"):
-            # TODO(T19): replace this stub with the real wiring once
-            # Amirmohammad's Yolo26Detector (T14) exists:
-            #   from mot_counting.detectors.yolo26_detector import Yolo26Detector
-            #   return Yolo26Detector(
-            #       model=loaded_model,
-            #       confidence_threshold=self._confidence_threshold,
-            #       classes=self._classes,
-            #   )
-            raise NotImplementedError(
-                "Concrete detector not yet wired — see T19.  "
-                "Yolo26Detector (T14) must be implemented and imported here."
+            from mot_counting.detectors.yolo26_detector import Yolo26Detector
+
+            return Yolo26Detector(
+                model=loaded_model,
+                imgsz=640,
+                confidence_threshold=self._confidence_threshold,
+                allowed_classes=self._classes,
             )
 
         # Unreachable given _SUPPORTED_VARIANTS above; guards future additions.

@@ -43,3 +43,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "integration: marks tests as end-to-end integration tests (require real model weights and sample clip)",
+]
