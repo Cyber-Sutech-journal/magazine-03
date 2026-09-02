@@ -27,7 +27,7 @@ def create_mock_model(conf_val: float, cls_val: int, xyxy_val: list[float], empt
     return mock_model
 
 
-# Case 1: This case verifies that a valid detection with high confidence and an allowed class is correctly processed and returned.
+# Case 1: Verifies valid detection is returned and model is called with correct arguments.
 def test_predict_returns_valid_detection():
     mock_model = create_mock_model(conf_val=0.9, cls_val=2, xyxy_val=[10.0, 20.0, 30.0, 40.0])
 
@@ -38,6 +38,8 @@ def test_predict_returns_valid_detection():
     dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
     detections = detector.predict(dummy_frame)
 
+    mock_model.assert_called_once_with(dummy_frame, imgsz=640, conf=0.5, verbose=False)
+
     assert len(detections) == 1
     assert detections[0].class_id == 2
     assert detections[0].class_name == "car"
@@ -45,7 +47,7 @@ def test_predict_returns_valid_detection():
     assert detections[0].xyxy == (10.0, 20.0, 30.0, 40.0)
 
 
-# Case 2: This case ensures that detections belonging to classes not listed in the allowed_classes configuration are filtered out.
+# Case 2: Filters out detections belonging to classes not listed in allowed_classes.
 def test_predict_filters_out_unallowed_class():
     mock_model = create_mock_model(conf_val=0.9, cls_val=1, xyxy_val=[10.0, 20.0, 30.0, 40.0])
 
@@ -59,9 +61,24 @@ def test_predict_filters_out_unallowed_class():
     assert len(detections) == 0
 
 
-# Case 3: This case confirms that detections with a confidence score below the defined threshold are successfully ignored.
-def test_predict_filters_out_low_confidence():
-    mock_model = create_mock_model(conf_val=0.3, cls_val=2, xyxy_val=[10.0, 20.0, 30.0, 40.0])
+# Case 3: Boundary check - detection with confidence exactly at threshold must be kept.
+def test_predict_keeps_detection_at_confidence_threshold():
+    mock_model = create_mock_model(conf_val=0.5, cls_val=2, xyxy_val=[10.0, 20.0, 30.0, 40.0])
+
+    detector = Yolo26Detector(
+        model=mock_model, imgsz=640, confidence_threshold=0.5, allowed_classes=["car", "person"]
+    )
+
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    detections = detector.predict(dummy_frame)
+
+    assert len(detections) == 1
+    assert detections[0].confidence == 0.5
+
+
+# Case 4: Boundary check - detection with confidence just below threshold must be dropped.
+def test_predict_filters_out_detection_just_below_confidence_threshold():
+    mock_model = create_mock_model(conf_val=0.49, cls_val=2, xyxy_val=[10.0, 20.0, 30.0, 40.0])
 
     detector = Yolo26Detector(
         model=mock_model, imgsz=640, confidence_threshold=0.5, allowed_classes=["car", "person"]
@@ -73,7 +90,7 @@ def test_predict_filters_out_low_confidence():
     assert len(detections) == 0
 
 
-# Case 4: This case checks that the detector safely returns an empty list when the model finds zero objects in the frame.
+# Case 5: Handles empty frames where no detections are made.
 def test_predict_handles_empty_frame():
     mock_model = create_mock_model(conf_val=0.0, cls_val=0, xyxy_val=[], empty=True)
 
