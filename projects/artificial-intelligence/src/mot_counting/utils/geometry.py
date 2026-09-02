@@ -12,7 +12,9 @@ def signed_distance(
     point_a: tuple[float, float], point_b: tuple[float, float], point_p: tuple[float, float]
 ) -> float:
     """
-    Calculate the signed distance from point P to the line defined by points A and B.
+    Calculate the signed cross-product value / oriented side magnitude from point P to the line defined by points A and B.
+
+    If point_a and point_b are exactly the same (a degenerate line), this function returns exactly 0.0 and never raises an exception.
 
     Args:
         point_a (tuple[float, float]): Coordinates of point A (x1, y1).
@@ -20,21 +22,18 @@ def signed_distance(
         point_p (tuple[float, float]): Coordinates of point P (x0, y0).
 
         Example:
-
             1:
             point_a = (0.0, 0.0), point_b = (10.0, 0.0), point_p = (5.0, 5.0)
             after calling this function, it will return 50.0
-            its positive number its mean point_p is above the line defined by point_a and point_b
+            its positive number means point_p is above the line defined by point_a and point_b.
 
             2:
             point_a = (0.0, 0.0), point_b = (10.0, 0.0), point_p = (5.0, -5.0)
             after calling this function, it will return -50.0
-            its negative number its mean point_p is below the line defined by point_a and point_b
-
-
+            its negative number means point_p is below the line defined by point_a and point_b.
 
     Returns:
-        float: The signed distance from point P to the line AB.
+        float: The signed cross-product value.
                Positive if P is on one side of the line, negative if on the other side.
     """
     x1, y1 = point_a
