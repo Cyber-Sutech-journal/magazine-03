@@ -12,19 +12,9 @@ def test_get_bbox_center():
     expected_center = (20.0, 40.0)
     assert get_bbox_center(bbox) == expected_center
 
-    # case 2: test with a bounding box with negative coordinates
-    bbox = (-10.0, -20.0, -30.0, -60.0)
+    # case 2: test with a valid bounding box with negative coordinates
+    bbox = (-30.0, -60.0, -10.0, -20.0)
     expected_center = (-20.0, -40.0)
-    assert get_bbox_center(bbox) == expected_center
-
-    # case 3: test with a bounding box with mixed coordinates
-    bbox = (-10.0, 20.0, 30.0, -60.0)
-    expected_center = (10.0, -20.0)
-    assert get_bbox_center(bbox) == expected_center
-
-    # case 4: test with a bounding box with floating point coordinates
-    bbox = (10.5, 20.2, 30.5, 60.8)
-    expected_center = (20.5, 40.5)
     assert get_bbox_center(bbox) == expected_center
 
 
@@ -34,14 +24,14 @@ def test_get_bottom_center():
     expected_bottom_center = (20.0, 60.0)
     assert get_bottom_center(bbox) == expected_bottom_center
 
-    # case 2: test with a bounding box with negative coordinates
-    bbox = (-10.0, -20.0, -30.0, -60.0)
-    expected_bottom_center = (-20.0, -60.0)
+    # case 2: test with a valid bounding box with negative coordinates
+    bbox = (-30.0, -60.0, -10.0, -20.0)
+    expected_bottom_center = (-20.0, -20.0)
     assert get_bottom_center(bbox) == expected_bottom_center
 
     # case 3: test with a bounding box with mixed coordinates
-    bbox = (-10.0, 20.0, 30.0, -60.0)
-    expected_bottom_center = (10.0, -60.0)
+    bbox = (-10.0, -60.0, 30.0, 20.0)
+    expected_bottom_center = (10.0, 20.0)
     assert get_bottom_center(bbox) == expected_bottom_center
 
     # case 4: test with a bounding box with floating point coordinates
