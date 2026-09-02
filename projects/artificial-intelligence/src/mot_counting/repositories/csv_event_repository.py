@@ -63,4 +63,5 @@ class CsvEventRepository(IEventRepository):
 
     def close(self) -> None:
         if not self.file.closed:
+            self.flush()
             self.file.close()
