@@ -28,7 +28,7 @@ class Yolo26Detector(IDetector):
         self.allowed_classes = allowed_classes
 
     def predict(self, frame: np.ndarray) -> list[Detection]:
-        results = self.model(frame, imgsz=self.imgsz)[0]
+        results = self.model(frame, imgsz=self.imgsz, verbose=False)[0]
         detections = []
 
         for box in results.boxes:
