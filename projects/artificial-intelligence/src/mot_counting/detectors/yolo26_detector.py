@@ -43,7 +43,7 @@ class Yolo26Detector(IDetector):
             if class_name not in self.allowed_classes:
                 continue
 
-            xyxy = box.xyxy[0].tolist()
+            xyxy = tuple(box.xyxy[0].tolist())
 
             detections.append(
                 Detection(xyxy=xyxy, confidence=conf, class_id=class_id, class_name=class_name)
