@@ -33,6 +33,7 @@ class TrackerFactory:
         track_thresh: float,
         match_thresh: float,
         track_buffer: int,
+        frame_rate: int = 30,
     ) -> None:
         """Initialise the factory with tracker hyperparameters.
 
@@ -42,10 +43,14 @@ class TrackerFactory:
             match_thresh: IoU threshold used for track–detection association.
             track_buffer: Number of frames a lost track is kept alive before
                 removal.
+            frame_rate: Video frame rate in FPS, passed to ByteTrackWrapper so
+                that its internal track buffer is calibrated to the actual clip
+                speed.  Defaults to 30.
         """
         self._track_thresh = track_thresh
         self._match_thresh = match_thresh
         self._track_buffer = track_buffer
+        self._frame_rate = frame_rate
 
     def create(self, tracker_type: str, loaded_tracker: object) -> ITracker:
         """Wrap *loaded_tracker* into the ``ITracker`` matching *tracker_type*.
@@ -74,18 +79,13 @@ class TrackerFactory:
             )
 
         if tracker_type == "bytetrack":
-            # TODO(T19): replace this stub with the real wiring once
-            # Farzad's ByteTrackWrapper (T15) exists:
-            #   from mot_counting.trackers.bytetrack_wrapper import ByteTrackWrapper
-            #   return ByteTrackWrapper(
-            #       tracker=loaded_tracker,
-            #       track_thresh=self._track_thresh,
-            #       match_thresh=self._match_thresh,
-            #       track_buffer=self._track_buffer,
-            #   )
-            raise NotImplementedError(
-                "Concrete ByteTrack tracker not yet wired — see T19.  "
-                "ByteTrackWrapper (T15) must be implemented and imported here."
+            from mot_counting.trackers.bytetrack_tracker import ByteTrackWrapper
+
+            return ByteTrackWrapper(
+                frame_rate=self._frame_rate,
+                track_thresh=self._track_thresh,
+                match_thresh=self._match_thresh,
+                track_buffer=self._track_buffer,
             )
 
         if tracker_type == "botsort":
