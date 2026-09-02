@@ -42,7 +42,7 @@ def test_predict_returns_valid_detection():
     assert detections[0].class_id == 2
     assert detections[0].class_name == "car"
     assert detections[0].confidence == 0.9
-    assert detections[0].xyxy == [10.0, 20.0, 30.0, 40.0]
+    assert detections[0].xyxy == (10.0, 20.0, 30.0, 40.0)
 
 
 # Case 2: This case ensures that detections belonging to classes not listed in the allowed_classes configuration are filtered out.
