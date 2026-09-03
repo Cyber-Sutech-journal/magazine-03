@@ -65,6 +65,6 @@ access_token = create_access_token(
 )
 
 return {
-   "access_token : access_token",
+   "access_token" : access_token,
    "token_type" : "bearer"
 }
