@@ -202,6 +202,25 @@ docker compose -f docker-compose.gpu.yml run --rm pipeline --config configs/ci.y
 
 ---
 
+## Continuous integration
+
+Every pull request into `ai-develop` must pass GitHub Actions before merge
+(§15.3). The workflow file is `.github/workflows/ai-ci.yml` at the
+**magazine-03 repository root** (this project is a subdirectory).
+
+Jobs (each fails independently so the red X is readable):
+
+1. **Lint and format (Ruff)** — `ruff check` and `ruff format --check`
+2. **Type check (mypy)** — `mypy src/mot_counting` (mypy, not pyright)
+3. **Unit tests (pytest)** — `pytest tests/unit/`
+4. **Docker CPU integration test** — build the CPU image and run
+   `configs/ci.yaml` on `data/ci_sample_clip.mp4` (synthetic clip; see
+   [`docs/ci-sample-clip.md`](docs/ci-sample-clip.md)). GPU is not run in CI.
+
+If a job fails, open it and read the last step **How to fix this job**.
+
+---
+
 ### Evaluating results
 
 ```bash

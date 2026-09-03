@@ -28,9 +28,10 @@ outputs/
 ~/.cache/ultralytics/
 .cache/
 
-# Data (only .gitkeep is committed; actual clips are large binaries)
+# Data: keep the CI sample clip in git; ignore other (large) clips
 data/*
 !data/.gitkeep
+!data/ci_sample_clip.mp4
 
 # IDE / editor
 .idea/

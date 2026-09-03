@@ -25,6 +25,8 @@ dev = [
     "pytest==9.1.1",
     "ruff==0.16.4",
     "pre-commit==4.6.2",
+    "mypy==1.19.1",
+    "types-PyYAML==6.0.12.20250915",
 ]
 
 [tool.setuptools.packages.find]
@@ -46,3 +48,17 @@ python_functions = ["test_*"]
 markers = [
     "integration: marks tests as end-to-end integration tests (require real model weights and sample clip)",
 ]
+
+# Type checker for CI (§15.4 / T21): mypy (not pyright).
+# Chosen because it is the common academic/Python default, matches our
+# existing .mypy_cache gitignore, and fails the PR with readable per-file errors.
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+packages = ["mot_counting"]
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+explicit_package_bases = true

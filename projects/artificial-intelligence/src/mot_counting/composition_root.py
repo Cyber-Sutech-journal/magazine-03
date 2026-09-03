@@ -30,6 +30,8 @@ from mot_counting.controllers.pipeline_controller import PipelineController
 from mot_counting.crossing.crossing_logic import CrossingLogic
 from mot_counting.factories.detector_factory import DetectorFactory
 from mot_counting.factories.tracker_factory import TrackerFactory
+from mot_counting.interfaces.detector import IDetector
+from mot_counting.interfaces.tracker import ITracker
 from mot_counting.observers.base import Subject
 from mot_counting.observers.logger_observer import LoggerObserver
 from mot_counting.repositories.csv_event_repository import CsvEventRepository
@@ -92,7 +94,12 @@ def _validate_classes_against_model(config: AppConfig, loaded_model: object) -> 
     Raises:
         ValueError: If any configured class name is not in ``loaded_model.names``.
     """
-    model_names: set[str] = set(loaded_model.names.values())  # type: ignore[union-attr]
+    names_attr = getattr(loaded_model, "names", None)
+    if not isinstance(names_attr, dict):
+        raise TypeError(
+            "Loaded YOLO model has no usable .names mapping; cannot validate detection.classes."
+        )
+    model_names = {str(name) for name in names_attr.values()}
     unknown = [c for c in config.detection.classes if c not in model_names]
     if unknown:
         raise ValueError(
@@ -106,7 +113,7 @@ def _validate_classes_against_model(config: AppConfig, loaded_model: object) -> 
 # ---------------------------------------------------------------------------
 
 
-def _create_detector(config: AppConfig, loaded_model: object) -> object:
+def _create_detector(config: AppConfig, loaded_model: object) -> IDetector:
     """Construct an ``IDetector`` via ``DetectorFactory``.
 
     Args:
@@ -123,7 +130,7 @@ def _create_detector(config: AppConfig, loaded_model: object) -> object:
     return factory.create(config.detection.model_variant, loaded_model)
 
 
-def _create_tracker(config: AppConfig, fps: float) -> object:
+def _create_tracker(config: AppConfig, fps: float) -> ITracker:
     """Construct an ``ITracker`` via ``TrackerFactory``.
 
     Args:
