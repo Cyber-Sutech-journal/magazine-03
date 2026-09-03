@@ -51,20 +51,32 @@ def _load_detector_model(config: AppConfig) -> object:
         config: Validated application configuration.
 
     Returns:
-        An ``ultralytics.YOLO`` model object with weights loaded from disk
-        (downloaded on first use if not cached).
+        An ``ultralytics.YOLO`` model object with weights loaded from a local
+        ``.pt`` file (baked into the Docker image at ``/app``, or present in
+        the working directory).  No runtime download is required.
 
     Raises:
         RuntimeError: If the model fails to load.
     """
+    from pathlib import Path
+
     from ultralytics import YOLO  # local import keeps startup fast if YOLO is not needed
 
     model_variant = config.detection.model_variant
-    logger.info("Loading YOLO model: %s", model_variant)
+    weight_name = f"{model_variant}.pt"
+    # Prefer an on-disk file (baked into the Docker image at /app, or present in cwd)
+    # so Ultralytics never falls back to a runtime download (§11).
+    candidates = [
+        Path(weight_name),
+        Path("/app") / weight_name,
+        Path(__file__).resolve().parents[2] / weight_name,
+    ]
+    weight_path = next((p for p in candidates if p.is_file()), Path(weight_name))
+    logger.info("Loading YOLO model from %s", weight_path)
     try:
-        model = YOLO(f"{model_variant}.pt")
+        model = YOLO(str(weight_path))
     except Exception as exc:
-        raise RuntimeError(f"Failed to load YOLO model '{model_variant}.pt': {exc}") from exc
+        raise RuntimeError(f"Failed to load YOLO model '{weight_path}': {exc}") from exc
     logger.info("YOLO model loaded successfully.")
     return model
 
