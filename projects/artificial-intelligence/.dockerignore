@@ -1,16 +1,66 @@
-# Filled in T20 with production-grade rules.
-# Placeholder entries to keep the Docker build context lean from day one.
+# .dockerignore — keeps the Docker build context small and reproducible (§11, T20)
+#
+# Excluded paths never reach the Docker daemon, so:
+#   - build time is faster (no large outputs/ or .git/ to transfer);
+#   - the image does not accidentally contain local experiment outputs,
+#     credentials, or editor metadata.
 
+# ── Version control ─────────────────────────────────────────────────────────
 .git/
+.gitignore
+.gitattributes
+
+# ── Python caches & build artefacts ─────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
 .venv/
-outputs/
+venv/
+env/
+**/site-packages/
+
+# ── Test & lint caches ───────────────────────────────────────────────────────
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-__pycache__/
-*.py[cod]
+.tox/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Pipeline outputs (written at runtime, never baked into image) ────────────
+outputs/
+
+# ── Local editor / OS metadata ───────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Environment / secrets ────────────────────────────────────────────────────
 .env
 .env.*
-README.fa.md
+*.secret
+
+# ── Documentation (not needed at runtime) ────────────────────────────────────
 docs/
+README.fa.md
+
+# ── Jupyter notebooks (experimental, not part of the production pipeline) ────
+*.ipynb
+.ipynb_checkpoints/
+
+# NOTE: yolo26n.pt and yolo26m.pt are intentionally NOT excluded.
+# They are COPIED into the image during 'docker build' (step 5 in Dockerfile)
+# so that model weights are baked in and zero network calls happen at runtime.

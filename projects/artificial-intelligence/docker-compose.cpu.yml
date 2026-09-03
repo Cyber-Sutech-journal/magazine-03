@@ -1,0 +1,58 @@
+# docker-compose.cpu.yml — CPU-only profile (§11)
+#
+# Runs the MOT counting pipeline on any machine, with or without a GPU.
+#
+# Quick start
+# -----------
+#   # Run the full pipeline against the default config (yolo26m):
+#   docker compose -f docker-compose.cpu.yml run --rm pipeline \
+#       --config configs/default.yaml
+#
+#   # Run against the lightweight CI config (yolo26n):
+#   docker compose -f docker-compose.cpu.yml run --rm pipeline \
+#       --config configs/ci.yaml
+#
+#   # Override the video path without editing YAML:
+#   docker compose -f docker-compose.cpu.yml run --rm pipeline \
+#       --config configs/default.yaml --video data/my_clip.mp4
+#
+#   # Run the unit test suite inside the container:
+#   docker compose -f docker-compose.cpu.yml run tests
+#
+# Volumes
+# -------
+# configs/, data/, and outputs/ are bind-mounted from the host so that:
+#   - you can swap configs and video clips without rebuilding the image;
+#   - pipeline outputs (annotated video, events.csv) are written back to
+#     the host filesystem and persist after the container exits.
+
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: python:3.12-slim
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+    image: mot-counting:cpu
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+    # Extra args: docker compose run --rm pipeline --config configs/ci.yaml
+    # Default CMD from Dockerfile is used when no command is supplied.
+
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: python:3.12-slim
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+    image: mot-counting:cpu
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+    entrypoint: ["python", "-m", "pytest"]
+    command: ["tests/unit/", "-v", "--tb=short"]
