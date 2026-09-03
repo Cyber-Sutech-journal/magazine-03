@@ -187,7 +187,12 @@ jobs:
       - name: Run the full pipeline inside Docker against configs/ci.yaml
         run: |
           mkdir -p outputs
-          docker compose -f docker-compose.cpu.yml run --rm --no-build pipeline --config configs/ci.yaml
+          docker run --rm \
+            -v "$PWD/configs:/app/configs:ro" \
+            -v "$PWD/data:/app/data:ro" \
+            -v "$PWD/outputs:/app/outputs" \
+            mot-counting:cpu \
+            --config configs/ci.yaml
 
       - name: Check annotated video and events.csv were written
         run: |
