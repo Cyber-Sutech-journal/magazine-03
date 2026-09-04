@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 
 from mot_counting.interfaces.visualizer import IVisualizer
+from mot_counting.observers.base import Observer
 from mot_counting.types import Direction, Track
 from mot_counting.visualizers.opencv_visualizer import (
     OpenCvVisualizer,
@@ -213,15 +216,26 @@ def test_draw_renders_and_returns_new_frame(blank_frame: np.ndarray, sample_trac
     assert np.array_equal(vis.last_annotated_frame, result)
 
 
+def test_visualizer_observer_inheritance_and_update_signature() -> None:
+    """Visualizer must be an Observer whose update() matches the §4.3 contract."""
+    vis = OpenCvVisualizer()
+    assert isinstance(vis, Observer)
+    assert isinstance(vis, IVisualizer)
+    assert list(inspect.signature(OpenCvVisualizer.update).parameters) == list(
+        inspect.signature(Observer.update).parameters
+    )
+
+
 def test_update_executes_pipeline_and_caches_frame(
     blank_frame: np.ndarray, sample_track: Track
 ) -> None:
-    """Verify update method complies with observer-style callback without raising errors."""
-    vis = OpenCvVisualizer()
+    """Observer.update renders via the bound frame and construction-time lines."""
+    vis = OpenCvVisualizer(lines=[((0, 0), (50, 50), "TestLine")])
+    vis.set_frame(blank_frame)
     vis.update(
-        frame=blank_frame,
+        frame_idx=0,
         tracks=[sample_track],
-        lines=[((0, 0), (50, 50), "TestLine")],
+        events=[],
         counters={"person": {"in": 1, "out": 0}},
     )
 

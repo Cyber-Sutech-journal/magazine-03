@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from mot_counting.interfaces.visualizer import IVisualizer
-from mot_counting.types import Track
+from mot_counting.types import CrossingEvent, Track
 
 # Color palette mapped by canonical class name with fallback to class_id
 CLASS_COLORS: dict[str | int, tuple[int, int, int]] = {
@@ -160,7 +160,12 @@ def format_counters_overlay(counters: dict) -> list[str]:
 
 
 class OpenCvVisualizer(IVisualizer):
-    """Visualizes tracked objects, lines, and counting statistics using OpenCV."""
+    """Visualizes tracked objects, lines, and counting statistics using OpenCV.
+
+    Implements both ``IVisualizer.draw`` and ``Observer.update`` (§4.3, §10.7).
+    Counting-line geometry is fixed at construction; the current raw frame is
+    bound with :meth:`set_frame` immediately before each observer notification.
+    """
 
     def __init__(
         self,
@@ -168,11 +173,14 @@ class OpenCvVisualizer(IVisualizer):
         text_color: tuple[int, int, int] = (255, 255, 255),
         line_thickness: int = 2,
         font_scale: float = 0.6,
+        lines: list | None = None,
     ) -> None:
         self.line_color = line_color
         self.text_color = text_color
         self.line_thickness = line_thickness
         self.font_scale = font_scale
+        self._lines: list = list(lines) if lines is not None else []
+        self._current_frame: np.ndarray | None = None
         self.last_annotated_frame: np.ndarray | None = None
 
     def draw(
@@ -275,15 +283,22 @@ class OpenCvVisualizer(IVisualizer):
 
     def update(
         self,
-        frame: np.ndarray,
-        tracks: list[Track] | None = None,
-        lines: list | None = None,
-        counters: dict | None = None,
+        frame_idx: int,
+        tracks: list[Track],
+        events: list[CrossingEvent],
+        counters: dict,
     ) -> None:
-        """Observer callback; performs rendering and stores output in self.last_annotated_frame."""
+        """Observer callback: render the bound frame and cache the annotated copy.
+
+        ``frame_idx`` and ``events`` are part of the Observer contract and are
+        unused for drawing.  Lines come from construction-time config; the
+        raw frame must have been bound via :meth:`set_frame`.
+        """
+        if self._current_frame is None:
+            return
         self.draw(
-            frame=frame,
-            tracks=tracks if tracks is not None else [],
-            lines=lines if lines is not None else [],
-            counters=counters if counters is not None else {},
+            frame=self._current_frame,
+            tracks=tracks,
+            lines=self._lines,
+            counters=counters,
         )

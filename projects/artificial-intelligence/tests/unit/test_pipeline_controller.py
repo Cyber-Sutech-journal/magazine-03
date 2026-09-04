@@ -171,6 +171,8 @@ def test_three_frame_run_calls_each_stage_three_times() -> None:
     assert mocks["tracker"].update.call_count == 3
     assert mocks["crossing_logic"].process.call_count == 3
     assert mocks["subject"].notify.call_count == 3
+    assert mocks["visualizer"].set_frame.call_count == 3
+    mocks["visualizer"].draw.assert_not_called()
 
 
 def test_frame_loop_sequence_is_detect_track_process_notify() -> None:
@@ -194,6 +196,7 @@ def test_frame_loop_sequence_is_detect_track_process_notify() -> None:
 
     subject = MagicMock(spec=Subject)
     subject.notify.side_effect = lambda *a, **kw: call_order.append("notify")
+    visualizer = MagicMock(spec=IVisualizer)
 
     controller = PipelineController(
         config=_make_config(),
@@ -202,13 +205,33 @@ def test_frame_loop_sequence_is_detect_track_process_notify() -> None:
         tracker=tracker,
         crossing_logic=crossing_logic,
         event_repository=MagicMock(spec=IEventRepository),
-        visualizer=MagicMock(spec=IVisualizer),
+        visualizer=visualizer,
         subject=subject,
     )
 
     controller.run()
 
     assert call_order == ["detect", "track", "process", "notify"]
+    visualizer.set_frame.assert_called_once()
+    visualizer.draw.assert_not_called()
+
+
+def test_video_writer_uses_observer_annotated_frame_without_draw() -> None:
+    """Annotated output must reuse Observer rendering, not a second draw()."""
+    visualizer = MagicMock(spec=IVisualizer)
+    visualizer.last_annotated_frame = _BLANK_FRAME.copy()
+    writer = MagicMock()
+
+    controller, mocks = _make_controller([(True, _BLANK_FRAME)])
+    controller._visualizer = visualizer  # noqa: SLF001
+    controller._video_writer = writer  # noqa: SLF001
+
+    controller.run()
+
+    visualizer.set_frame.assert_called_once()
+    visualizer.draw.assert_not_called()
+    writer.write.assert_called_once()
+    np.testing.assert_array_equal(writer.write.call_args[0][0], visualizer.last_annotated_frame)
 
 
 # ---------------------------------------------------------------------------

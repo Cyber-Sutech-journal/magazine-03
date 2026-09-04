@@ -2,17 +2,32 @@
 
 Defines the ``IVisualizer`` contract for drawing bounding boxes, counting
 lines, and live counters onto annotated output frames.
+
+The visualizer is also an :class:`~mot_counting.observers.base.Observer`
+(§4.3, §10.7): it is notified once per frame after crossing state is updated.
+``draw()`` remains the pure rendering primitive; ``Observer.update()`` is the
+pipeline callback.  The current raw frame is bound via :meth:`set_frame`
+because the Observer contract does not include image data.
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 import numpy as np
 
+from mot_counting.observers.base import Observer
 from mot_counting.types import Track
 
 
-class IVisualizer(ABC):
-    """Abstract interface for annotating video frames."""
+class IVisualizer(Observer):
+    """Abstract interface for annotating video frames as an Observer."""
+
+    def set_frame(self, frame: np.ndarray) -> None:
+        """Bind the current raw frame for the next :meth:`Observer.update` call.
+
+        The controller supplies the frame immediately before notifying the
+        ``Subject``.  Rendering itself happens inside ``update()``, not here.
+        """
+        self._current_frame = frame
 
     @abstractmethod
     def draw(
