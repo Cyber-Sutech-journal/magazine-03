@@ -1,0 +1,50 @@
+# docker-compose.gpu.yml — CUDA image profile (§11)
+#
+# Builds the pipeline on nvidia/cuda + cuDNN so inference *can* use an NVIDIA
+# GPU.  GPU is for speed only; results must match the CPU profile.
+#
+# This file does NOT reserve an nvidia device by default.  Docker Desktop on
+# macOS/Windows has no nvidia driver, and `driver: nvidia` would fail after a
+# long successful build with:
+#   could not select device driver "nvidia" with capabilities: [[gpu]]
+#
+# On a Linux host with NVIDIA GPU + nvidia-container-toolkit, pass --gpus all:
+#   docker compose -f docker-compose.gpu.yml run --rm --gpus all pipeline \
+#       --config configs/ci.yaml
+#
+# Smoke-test the CUDA image without a GPU (CPU fallback, possibly emulated):
+#   docker compose -f docker-compose.gpu.yml run --rm pipeline \
+#       --config configs/ci.yaml
+
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu124
+    image: mot-counting:gpu
+    platform: linux/amd64
+    pull_policy: never
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu124
+    image: mot-counting:gpu
+    platform: linux/amd64
+    pull_policy: never
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./data:/app/data:ro
+      - ./outputs:/app/outputs
+    entrypoint: ["python", "-m", "pytest"]
+    command: ["tests/unit/", "-v", "--tb=short"]
