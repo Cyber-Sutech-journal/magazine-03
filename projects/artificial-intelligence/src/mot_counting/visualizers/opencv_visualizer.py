@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 import cv2
 import numpy as np
 
@@ -70,6 +72,33 @@ def _parse_line(line: object) -> tuple[tuple[int, int], tuple[int, int], str] | 
     return None
 
 
+def _canonical_direction(direction: object) -> str:
+    """Normalize a Direction enum or string key to ``IN`` / ``OUT``.
+
+    ``ICrossingLogic.get_counters()`` uses ``Direction`` members as the third
+    tuple key.  ``str(Direction.IN)`` is ``'Direction.IN'`` (so ``.upper()``
+    becomes ``'DIRECTION.IN'``), which must not be used as the overlay lookup
+    key.  Enum members are reduced to their ``.value``; plain strings such as
+    ``'in'`` / ``'IN'`` remain supported.
+    """
+    if isinstance(direction, Enum):
+        direction = direction.value
+    return str(direction).strip().upper()
+
+
+def _direction_counts(dirs: dict) -> tuple[int, int]:
+    """Return ``(in_count, out_count)`` from a direction→count mapping."""
+    in_cnt = 0
+    out_cnt = 0
+    for key, count in dirs.items():
+        label = _canonical_direction(key)
+        if label == "IN":
+            in_cnt = int(count)
+        elif label == "OUT":
+            out_cnt = int(count)
+    return in_cnt, out_cnt
+
+
 def format_counters_overlay(counters: dict) -> list[str]:
     """Format counting dictionary into readable text overlay lines.
 
@@ -90,18 +119,19 @@ def format_counters_overlay(counters: dict) -> list[str]:
         for (c_name, l_id, direction), count in counters.items():
             l_id_str = str(l_id)
             c_name_str = str(c_name).capitalize()
-            dir_str = str(direction).upper()
+            dir_str = _canonical_direction(direction)
+            if dir_str not in {"IN", "OUT"}:
+                continue
             if l_id_str not in grouped:
                 grouped[l_id_str] = {}
             if c_name_str not in grouped[l_id_str]:
                 grouped[l_id_str][c_name_str] = {"IN": 0, "OUT": 0}
-            grouped[l_id_str][c_name_str][dir_str] = count
+            grouped[l_id_str][c_name_str][dir_str] = int(count)
 
         for l_id_str in sorted(grouped.keys()):
             lines.append(f"[{l_id_str}]")
             for c_name_str in sorted(grouped[l_id_str].keys()):
-                in_cnt = grouped[l_id_str][c_name_str].get("IN", 0)
-                out_cnt = grouped[l_id_str][c_name_str].get("OUT", 0)
+                in_cnt, out_cnt = _direction_counts(grouped[l_id_str][c_name_str])
                 lines.append(f"  {c_name_str} IN: {in_cnt} OUT: {out_cnt}")
         return lines
 
@@ -112,15 +142,13 @@ def format_counters_overlay(counters: dict) -> list[str]:
             for l_id, sub_dict in counters.items():
                 lines.append(f"[{l_id}]")
                 for c_name, dirs in sub_dict.items():
-                    in_cnt = dirs.get("in", dirs.get("IN", 0))
-                    out_cnt = dirs.get("out", dirs.get("OUT", 0))
+                    in_cnt, out_cnt = _direction_counts(dirs)
                     lines.append(f"  {str(c_name).capitalize()} IN: {in_cnt} OUT: {out_cnt}")
             return lines
 
         # Flat dict: {class_name: {in: x, out: y}}
         for c_name, dirs in counters.items():
-            in_cnt = dirs.get("in", dirs.get("IN", 0))
-            out_cnt = dirs.get("out", dirs.get("OUT", 0))
+            in_cnt, out_cnt = _direction_counts(dirs)
             lines.append(f"{str(c_name).capitalize()} IN: {in_cnt} OUT: {out_cnt}")
         return lines
 

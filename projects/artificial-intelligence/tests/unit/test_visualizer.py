@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from mot_counting.interfaces.visualizer import IVisualizer
-from mot_counting.types import Track
+from mot_counting.types import Direction, Track
 from mot_counting.visualizers.opencv_visualizer import (
     OpenCvVisualizer,
     _get_color,
@@ -166,6 +166,20 @@ def test_format_counters_flat_dict() -> None:
 def test_format_counters_empty() -> None:
     """Verify empty dictionary returns empty list."""
     assert format_counters_overlay({}) == []
+
+
+def test_format_counters_real_direction_enum() -> None:
+    """Live overlay must read Direction.IN/OUT keys from get_counters()."""
+    counters = {
+        ("person", "main_line", Direction.IN): 4,
+        ("person", "main_line", Direction.OUT): 2,
+        ("car", "main_line", Direction.IN): 1,
+    }
+    overlay = format_counters_overlay(counters)
+    assert "[main_line]" in overlay
+    assert "  Person IN: 4 OUT: 2" in overlay
+    assert "  Car IN: 1 OUT: 0" in overlay
+    assert all("DIRECTION.IN" not in line for line in overlay)
 
 
 # ---------------------------------------------------------------------------
