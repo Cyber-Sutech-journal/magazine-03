@@ -18,7 +18,9 @@ from mot_counting.interfaces.frame_source import IFrameSource
 from mot_counting.interfaces.repository import IEventRepository
 from mot_counting.interfaces.tracker import ITracker
 from mot_counting.interfaces.visualizer import IVisualizer
-from mot_counting.observers.base import Subject
+from mot_counting.observers.base import Observer, Subject
+from mot_counting.observers.logger_observer import LoggerObserver
+from mot_counting.visualizers.opencv_visualizer import OpenCvVisualizer
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -35,6 +37,8 @@ def test_build_pipeline_ci_config_loads_expected_detection_settings() -> None:
 
     assert controller.config.detection.model_variant == "yolo26n"
     assert controller.config.video.path == "data/ci_sample_clip.mp4"
+    assert controller.config.detection.imgsz == 640
+    assert controller._detector.imgsz == controller.config.detection.imgsz  # noqa: SLF001
 
 
 def test_build_pipeline_exposes_interface_typed_dependencies() -> None:
@@ -52,6 +56,19 @@ def test_build_pipeline_exposes_interface_typed_dependencies() -> None:
     assert isinstance(controller._event_repository, IEventRepository)  # noqa: SLF001
     assert isinstance(controller._visualizer, IVisualizer)  # noqa: SLF001
     assert isinstance(controller._frame_source, IFrameSource)  # noqa: SLF001
+
+
+def test_visualizer_is_observer_and_subscribed_once() -> None:
+    """Composition root must subscribe the injected visualizer as an Observer."""
+    controller = build_pipeline(str(PROJECT_ROOT / "configs" / "ci.yaml"))
+    visualizer = controller._visualizer  # noqa: SLF001
+    observers = controller.subject._observers  # noqa: SLF001
+
+    assert isinstance(visualizer, Observer)
+    assert isinstance(visualizer, OpenCvVisualizer)
+    assert visualizer in observers
+    assert observers.count(visualizer) == 1
+    assert any(isinstance(obs, LoggerObserver) for obs in observers)
 
 
 def test_build_pipeline_default_config_also_succeeds() -> None:

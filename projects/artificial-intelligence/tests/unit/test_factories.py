@@ -1,21 +1,23 @@
 """Unit tests for DetectorFactory and TrackerFactory (§4.1).
 
-NOTE (T19 update point)
------------------------
-The tests marked ``# STUB`` below verify only that the known-variant code
-paths are reachable and raise the *documented* ``NotImplementedError`` rather
-than an unrelated crash.  When T19 wires real concrete implementations, those
-tests must be updated to assert that the returned object is an instance of
-``IDetector`` / ``ITracker`` respectively.  Search for ``# STUB`` to find
-every test that needs updating.
+T19 update
+----------
+Stub assertions (``NotImplementedError``) removed; tests now verify that
+factories return real ``IDetector`` / ``ITracker`` instances when given
+appropriate model objects (mock for detector, ``None`` for ByteTrack since
+ByteTrackWrapper is self-contained).
 """
 
 from __future__ import annotations
 
 import pytest
 
+from mot_counting.detectors.yolo26_detector import Yolo26Detector
 from mot_counting.factories.detector_factory import DetectorFactory
 from mot_counting.factories.tracker_factory import TrackerFactory
+from mot_counting.interfaces.detector import IDetector
+from mot_counting.interfaces.tracker import ITracker
+from mot_counting.trackers.bytetrack_tracker import ByteTrackWrapper
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -23,19 +25,21 @@ from mot_counting.factories.tracker_factory import TrackerFactory
 
 
 class _FakeModel:
-    """Stands in for an already-loaded YOLO model (no weights loaded here)."""
+    """Minimal stand-in for an already-loaded Ultralytics YOLO model.
 
+    Only the attributes consumed by Yolo26Detector and DetectorFactory are
+    provided so that no real model weights are required in unit tests.
+    """
 
-class _FakeTracker:
-    """Stands in for an already-initialised ByteTrack / BoT-SORT object."""
+    names: dict[int, str] = {0: "person", 1: "car", 2: "truck"}
 
 
 def _detector_factory() -> DetectorFactory:
-    return DetectorFactory(confidence_threshold=0.4, classes=["person", "car"])
+    return DetectorFactory(confidence_threshold=0.4, classes=["person", "car"], imgsz=640)
 
 
 def _tracker_factory() -> TrackerFactory:
-    return TrackerFactory(track_thresh=0.5, match_thresh=0.8, track_buffer=30)
+    return TrackerFactory(track_thresh=0.5, match_thresh=0.8, track_buffer=30, frame_rate=30)
 
 
 # ---------------------------------------------------------------------------
@@ -54,15 +58,27 @@ def test_detector_factory_unknown_variant_raises_value_error(bad_variant: str) -
 
 
 # ---------------------------------------------------------------------------
-# DetectorFactory — all known variants raise NotImplementedError (STUB)
+# DetectorFactory — all known variants return a real IDetector (T19)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("variant", ["yolo26n", "yolo26s", "yolo26m", "yolo26l", "yolo26x"])
-def test_detector_factory_known_variant_stub_raises_not_implemented(variant: str) -> None:  # STUB
+def test_detector_factory_known_variant_returns_idetector(variant: str) -> None:
+    """Factory must return a concrete IDetector wrapping the provided model."""
     factory = _detector_factory()
-    with pytest.raises(NotImplementedError, match="T19"):
-        factory.create(variant, _FakeModel())
+    detector = factory.create(variant, _FakeModel())
+    assert isinstance(detector, IDetector)
+    assert isinstance(detector, Yolo26Detector)
+
+
+def test_detector_factory_passes_config_to_yolo26_detector() -> None:
+    """Confidence, class list, and configured imgsz must reach the detector."""
+    factory = DetectorFactory(confidence_threshold=0.7, classes=["truck"], imgsz=320)
+    detector = factory.create("yolo26m", _FakeModel())
+    assert isinstance(detector, Yolo26Detector)
+    assert detector.confidence_threshold == 0.7
+    assert detector.allowed_classes == ["truck"]
+    assert detector.imgsz == 320
 
 
 # ---------------------------------------------------------------------------
@@ -77,29 +93,42 @@ def test_detector_factory_known_variant_stub_raises_not_implemented(variant: str
 def test_tracker_factory_unknown_type_raises_value_error(bad_type: str) -> None:
     factory = _tracker_factory()
     with pytest.raises(ValueError, match="Unknown tracker type"):
-        factory.create(bad_type, _FakeTracker())
+        factory.create(bad_type, None)
 
 
 # ---------------------------------------------------------------------------
-# TrackerFactory — bytetrack stub raises NotImplementedError (STUB)
+# TrackerFactory — bytetrack returns real ITracker (T19)
 # ---------------------------------------------------------------------------
 
 
-def test_tracker_factory_bytetrack_stub_raises_not_implemented() -> None:  # STUB
+def test_tracker_factory_bytetrack_returns_itracker() -> None:
+    """Factory must return a ByteTrackWrapper satisfying ITracker."""
     factory = _tracker_factory()
-    with pytest.raises(NotImplementedError, match="T19"):
-        factory.create("bytetrack", _FakeTracker())
+    tracker = factory.create("bytetrack", None)
+    assert isinstance(tracker, ITracker)
+    assert isinstance(tracker, ByteTrackWrapper)
+
+
+def test_tracker_factory_bytetrack_passes_hyperparams() -> None:
+    """Tracker hyperparameters must be forwarded to the ByteTrackWrapper."""
+    factory = TrackerFactory(track_thresh=0.6, match_thresh=0.75, track_buffer=20, frame_rate=25)
+    tracker = factory.create("bytetrack", None)
+    assert isinstance(tracker, ByteTrackWrapper)
+    assert tracker.args.track_thresh == pytest.approx(0.6)
+    assert tracker.args.match_thresh == pytest.approx(0.75)
+    assert tracker.args.track_buffer == 20
+    assert tracker.args.frame_rate == 25
 
 
 # ---------------------------------------------------------------------------
-# TrackerFactory — botsort stub raises NotImplementedError (STUB)
+# TrackerFactory — botsort still raises NotImplementedError (stretch goal)
 # ---------------------------------------------------------------------------
 
 
-def test_tracker_factory_botsort_stub_raises_not_implemented() -> None:  # STUB
+def test_tracker_factory_botsort_raises_not_implemented() -> None:
     factory = _tracker_factory()
-    with pytest.raises(NotImplementedError, match="T19"):
-        factory.create("botsort", _FakeTracker())
+    with pytest.raises(NotImplementedError):
+        factory.create("botsort", None)
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +137,12 @@ def test_tracker_factory_botsort_stub_raises_not_implemented() -> None:  # STUB
 
 
 def test_detector_factory_does_not_load_models_itself() -> None:
-    """Constructing DetectorFactory with a fake model object must not raise."""
+    """Constructing DetectorFactory must not raise."""
     factory = _detector_factory()
     assert factory is not None
 
 
 def test_tracker_factory_does_not_initialise_trackers_itself() -> None:
-    """Constructing TrackerFactory with fake parameters must not raise."""
+    """Constructing TrackerFactory must not raise."""
     factory = _tracker_factory()
     assert factory is not None

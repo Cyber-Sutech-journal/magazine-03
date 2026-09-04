@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 import pytest
 
@@ -19,6 +20,7 @@ from mot_counting.interfaces.tracker import ITracker
 from mot_counting.interfaces.visualizer import IVisualizer
 from mot_counting.observers.base import Subject
 from mot_counting.types import CrossingEvent, Detection, Direction, Track
+from mot_counting.utils.video_io import OpenCvFrameSource
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -169,6 +171,8 @@ def test_three_frame_run_calls_each_stage_three_times() -> None:
     assert mocks["tracker"].update.call_count == 3
     assert mocks["crossing_logic"].process.call_count == 3
     assert mocks["subject"].notify.call_count == 3
+    assert mocks["visualizer"].set_frame.call_count == 3
+    mocks["visualizer"].draw.assert_not_called()
 
 
 def test_frame_loop_sequence_is_detect_track_process_notify() -> None:
@@ -192,6 +196,7 @@ def test_frame_loop_sequence_is_detect_track_process_notify() -> None:
 
     subject = MagicMock(spec=Subject)
     subject.notify.side_effect = lambda *a, **kw: call_order.append("notify")
+    visualizer = MagicMock(spec=IVisualizer)
 
     controller = PipelineController(
         config=_make_config(),
@@ -200,13 +205,33 @@ def test_frame_loop_sequence_is_detect_track_process_notify() -> None:
         tracker=tracker,
         crossing_logic=crossing_logic,
         event_repository=MagicMock(spec=IEventRepository),
-        visualizer=MagicMock(spec=IVisualizer),
+        visualizer=visualizer,
         subject=subject,
     )
 
     controller.run()
 
     assert call_order == ["detect", "track", "process", "notify"]
+    visualizer.set_frame.assert_called_once()
+    visualizer.draw.assert_not_called()
+
+
+def test_video_writer_uses_observer_annotated_frame_without_draw() -> None:
+    """Annotated output must reuse Observer rendering, not a second draw()."""
+    visualizer = MagicMock(spec=IVisualizer)
+    visualizer.last_annotated_frame = _BLANK_FRAME.copy()
+    writer = MagicMock()
+
+    controller, mocks = _make_controller([(True, _BLANK_FRAME)])
+    controller._visualizer = visualizer  # noqa: SLF001
+    controller._video_writer = writer  # noqa: SLF001
+
+    controller.run()
+
+    visualizer.set_frame.assert_called_once()
+    visualizer.draw.assert_not_called()
+    writer.write.assert_called_once()
+    np.testing.assert_array_equal(writer.write.call_args[0][0], visualizer.last_annotated_frame)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +290,87 @@ def test_mid_stream_decode_failure_skips_frame_and_continues(
     assert controller.stats.frames_skipped == 1
     assert any("decode failure" in r.message.lower() for r in caplog.records)
     assert mocks["detector"].predict.call_count == 2
+
+
+def test_concrete_source_skips_decode_failure_then_counts_eof(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OpenCvFrameSource: valid → grab-ok/retrieve-fail → valid → EOF."""
+    frame_a = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame_b = np.ones((480, 640, 3), dtype=np.uint8)
+
+    with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+        source = OpenCvFrameSource()
+    capture = MagicMock()
+    capture.grab.side_effect = [True, True, True, False]
+    capture.retrieve.side_effect = [(True, frame_a), (False, None), (True, frame_b)]
+    capture.get.side_effect = lambda prop: {
+        cv2.CAP_PROP_FPS: 30.0,
+        cv2.CAP_PROP_FRAME_WIDTH: 640.0,
+        cv2.CAP_PROP_FRAME_HEIGHT: 480.0,
+    }.get(prop, 0.0)
+    source._capture = capture
+
+    controller, _mocks = _make_controller(frames=[])
+    controller._frame_source = source  # noqa: SLF001
+
+    with caplog.at_level(logging.WARNING):
+        controller.run()
+
+    assert controller.stats.frames_processed == 2
+    assert controller.stats.frames_skipped == 1
+    capture.release.assert_called()
+    assert any("decode failure" in r.message.lower() for r in caplog.records)
+
+
+def test_concrete_source_grab_false_mid_stream_does_not_stop_before_later_frames(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """grab() False with remaining FRAME_COUNT must skip, then process later frames."""
+    frame_a = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame_b = np.ones((480, 640, 3), dtype=np.uint8)
+    state = {"pos": 0.0}
+    grab_results = iter([True, False, True, False])
+
+    def grab() -> bool:
+        ok = next(grab_results)
+        if ok:
+            state["pos"] += 1.0
+        return ok
+
+    def cap_get(prop: int) -> float:
+        return {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_WIDTH: 640.0,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480.0,
+            cv2.CAP_PROP_FRAME_COUNT: 3.0,
+            cv2.CAP_PROP_POS_FRAMES: state["pos"],
+        }.get(prop, 0.0)
+
+    def cap_set(prop: int, value: float) -> bool:
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            state["pos"] = float(value)
+        return True
+
+    with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+        source = OpenCvFrameSource()
+    capture = MagicMock()
+    capture.grab.side_effect = grab
+    capture.get.side_effect = cap_get
+    capture.set.side_effect = cap_set
+    capture.retrieve.side_effect = [(True, frame_a), (True, frame_b)]
+    source._capture = capture
+
+    controller, mocks = _make_controller(frames=[])
+    controller._frame_source = source  # noqa: SLF001
+
+    with caplog.at_level(logging.WARNING):
+        controller.run()
+
+    assert controller.stats.frames_processed == 2
+    assert controller.stats.frames_skipped == 1
+    assert mocks["detector"].predict.call_count == 2
+    assert any("decode failure" in r.message.lower() for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

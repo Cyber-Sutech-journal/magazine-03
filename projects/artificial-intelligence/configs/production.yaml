@@ -1,0 +1,47 @@
+# T23 production configuration — yolo26m detector, CPU-safe defaults.
+# Video path, output paths, and line geometry are overridden per-clip by
+# run_production.py.  Do NOT add clip-specific geometry here.
+
+video:
+  path: "OVERRIDDEN_BY_RUN_PRODUCTION_SCRIPT"
+  output_dir: "OVERRIDDEN_BY_RUN_PRODUCTION_SCRIPT"
+
+detection:
+  model_variant: "yolo26m"    # locked production detector — §3 / T23
+  imgsz: 640
+  confidence_threshold: 0.4
+  classes: ["person", "car"]  # validated against model.names at startup
+
+tracker:
+  type: "bytetrack"
+  track_thresh: 0.5
+  match_thresh: 0.8
+  track_buffer: 30
+
+# Line geometry below is a placeholder; run_production.py does NOT override
+# lines — they must be set in a clip-specific config or here before the run.
+# Coordinates are absolute pixels for the target clip resolution.
+lines:
+  - line_id: "main_line"
+    point_a: [100, 400]
+    point_b: [800, 400]
+    positive_direction: "A_to_B"   # A_to_B crossing = IN
+
+crossing_logic:
+  reference_point: "bottom_center"
+  history_length: 8
+  confirmation_majority_threshold: 0.7
+  cooldown_seconds: 1.5
+  stale_track_timeout_seconds: 2.0
+  min_displacement_px: null
+  min_velocity_px_per_s: null
+
+events:
+  output_csv: "OVERRIDDEN_BY_RUN_PRODUCTION_SCRIPT"
+
+evaluation:
+  matching_tolerance_seconds: 1.0
+
+visualization:
+  output_video: "OVERRIDDEN_BY_RUN_PRODUCTION_SCRIPT"
+  draw_trails: false

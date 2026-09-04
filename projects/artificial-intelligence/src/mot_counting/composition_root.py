@@ -1,233 +1,185 @@
 """Manual composition root — single place for DI wiring (§4.6).
 
-This module is the only location where concrete implementations are chosen
+This module is the **only** location where concrete implementations are chosen
 and assembled into a :class:`~mot_counting.controllers.pipeline_controller.PipelineController`.
 Callers (e.g. ``scripts/run_pipeline.py``) must import only
 :func:`build_pipeline` from here — never concrete detector/tracker classes.
 
-Wiring status (T09 skeleton)
-----------------------------
-Several steps are intentionally stubbed until downstream tasks land:
+Wiring (T19)
+------------
+All stubs replaced by real implementations:
 
-- **Model loading** — placeholder objects stand in for Ultralytics YOLO26 and
-  ByteTrack backends (T14/T15, wired in T19).
-- **Class-list validation** — deferred to T19 (§4.1, §10.1).
-- **Line-geometry validation** — deferred to T10/T19 inside
-  ``PipelineController`` once the video is opened (§7.3).
-- **Factory ``.create()``** — factories are constructed and called, but fall
-  back to no-op interface stubs when concrete wrappers are not yet wired
-  (T19).
-- **Logger / Visualizer observers** — ``Subject`` is created and returned on
-  the controller; T16/T17 will subscribe their concrete observers later.
+- YOLO26 model loaded once via Ultralytics.
+- Class-list validated against ``model.names`` immediately after loading (§4.1, §7.1).
+- ``Yolo26Detector`` and ``ByteTrackWrapper`` wired via their respective Factories.
+- Real ``CrossingLogic``, ``CsvEventRepository``, ``OpenCvVisualizer``,
+  ``OpenCvFrameSource`` injected into ``PipelineController``.
+- ``LoggerObserver`` and ``OpenCvVisualizer`` subscribed to the ``Subject``.
+- ``cv2.VideoWriter`` created and passed to ``PipelineController`` for annotated output.
 """
 
 from __future__ import annotations
 
-import numpy as np
+import logging
+import os
+
+import cv2
 
 from mot_counting.config import AppConfig, load_config
 from mot_counting.controllers.pipeline_controller import PipelineController
+from mot_counting.crossing.crossing_logic import CrossingLogic
 from mot_counting.factories.detector_factory import DetectorFactory
 from mot_counting.factories.tracker_factory import TrackerFactory
-from mot_counting.interfaces.crossing import ICrossingLogic
 from mot_counting.interfaces.detector import IDetector
-from mot_counting.interfaces.frame_source import IFrameSource
-from mot_counting.interfaces.repository import IEventRepository
 from mot_counting.interfaces.tracker import ITracker
-from mot_counting.interfaces.visualizer import IVisualizer
 from mot_counting.observers.base import Subject
-from mot_counting.types import CrossingEvent, Detection, Track
+from mot_counting.observers.logger_observer import LoggerObserver
+from mot_counting.repositories.csv_event_repository import CsvEventRepository
+from mot_counting.utils.video_io import OpenCvFrameSource
+from mot_counting.visualizers.opencv_visualizer import OpenCvVisualizer
 
-# ---------------------------------------------------------------------------
-# Wiring stubs — replaced by real implementations in T19
-# ---------------------------------------------------------------------------
-
-
-class _StubDetector(IDetector):
-    """No-op detector used until Yolo26Detector is wired in T19."""
-
-    def predict(self, frame: np.ndarray) -> list[Detection]:
-        return []
-
-
-class _StubTracker(ITracker):
-    """No-op tracker used until ByteTrackWrapper is wired in T19."""
-
-    def update(
-        self,
-        detections: list[Detection],
-        frame_idx: int,
-        frame: np.ndarray,
-    ) -> list[Track]:
-        return []
-
-
-class _StubCrossingLogic(ICrossingLogic):
-    """No-op crossing logic used until CrossingLogic is implemented (T11)."""
-
-    def process(
-        self,
-        tracks: list[Track],
-        frame_idx: int,
-        timestamp_seconds: float,
-    ) -> list[CrossingEvent]:
-        return []
-
-    def get_counters(self) -> dict:
-        return {}
-
-
-class _StubEventRepository(IEventRepository):
-    """In-memory no-op repository used until CsvEventRepository exists (T12)."""
-
-    def save(self, event: CrossingEvent) -> None:
-        pass
-
-    def flush(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-
-class _StubVisualizer(IVisualizer):
-    """Pass-through visualizer used until the real visualizer exists (T17)."""
-
-    def draw(
-        self,
-        frame: np.ndarray,
-        tracks: list[Track],
-        lines: list,
-        counters: dict,
-    ) -> np.ndarray:
-        return frame.copy()
-
-
-class _StubFrameSource(IFrameSource):
-    """No-op frame source used until OpenCV video reader exists (T13)."""
-
-    def read(self) -> tuple[bool, np.ndarray | None]:
-        return False, None
-
-    def get_fps(self) -> float:
-        return 30.0
-
-    def get_frame_size(self) -> tuple[int, int]:
-        return (640, 480)
-
-    def release(self) -> None:
-        pass
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Model-loading stubs (§4.1 boundary)
+# Model loading (§4.1 boundary — happens in composition root, not in Factories)
 # ---------------------------------------------------------------------------
 
 
 def _load_detector_model(config: AppConfig) -> object:
-    """Load the underlying YOLO26 model object once per pipeline run.
-
-    TODO(T19): replace with real Ultralytics model loading once T14 lands::
-
-        from ultralytics import YOLO
-        return YOLO(f"{config.detection.model_variant}.pt")
+    """Load the Ultralytics YOLO26 model object once per pipeline run.
 
     Args:
         config: Validated application configuration.
 
     Returns:
-        A placeholder object until real loading is wired in T19.
+        An ``ultralytics.YOLO`` model object with weights loaded from a local
+        ``.pt`` file (baked into the Docker image at ``/app``, or present in
+        the working directory).  No runtime download is required.
+
+    Raises:
+        RuntimeError: If the model fails to load.
     """
-    return object()
+    from pathlib import Path
 
+    from ultralytics import YOLO  # local import keeps startup fast if YOLO is not needed
 
-def _load_tracker_backend(config: AppConfig) -> object:
-    """Initialise the underlying tracker backend once per pipeline run.
-
-    TODO(T19): replace with real ByteTrack / BoT-SORT initialisation once T15
-    lands.  The exact library and constructor depend on Farzad's chosen
-    integration path.
-
-    Args:
-        config: Validated application configuration.
-
-    Returns:
-        A placeholder object until real initialisation is wired in T19.
-    """
-    return object()
+    model_variant = config.detection.model_variant
+    weight_name = f"{model_variant}.pt"
+    # Prefer an on-disk file (baked into the Docker image at /app, or present in cwd)
+    # so Ultralytics never falls back to a runtime download (§11).
+    candidates = [
+        Path(weight_name),
+        Path("/app") / weight_name,
+        Path(__file__).resolve().parents[2] / weight_name,
+    ]
+    weight_path = next((p for p in candidates if p.is_file()), Path(weight_name))
+    logger.info("Loading YOLO model from %s", weight_path)
+    try:
+        model = YOLO(str(weight_path))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load YOLO model '{weight_path}': {exc}") from exc
+    logger.info("YOLO model loaded successfully.")
+    return model
 
 
 def _validate_classes_against_model(config: AppConfig, loaded_model: object) -> None:
-    """Fail-fast if configured class names are absent from the loaded model.
-
-    TODO(T19): implement real validation against ``loaded_model.names``::
-
-        model_names = set(loaded_model.names.values())
-        unknown = [c for c in config.detection.classes if c not in model_names]
-        if unknown:
-            raise ValueError(
-                f"Unknown class names in config: {unknown}.  "
-                f"Valid names on loaded model: {sorted(model_names)}"
-            )
+    """Fail-fast if configured class names are absent from the loaded model (§4.1, §7.1).
 
     Args:
         config: Validated application configuration.
         loaded_model: Already-loaded YOLO model object from
             :func:`_load_detector_model`.
+
+    Raises:
+        ValueError: If any configured class name is not in ``loaded_model.names``.
     """
+    names_attr = getattr(loaded_model, "names", None)
+    if not isinstance(names_attr, dict):
+        raise TypeError(
+            "Loaded YOLO model has no usable .names mapping; cannot validate detection.classes."
+        )
+    model_names = {str(name) for name in names_attr.values()}
+    unknown = [c for c in config.detection.classes if c not in model_names]
+    if unknown:
+        raise ValueError(
+            f"Unknown class name(s) in config detection.classes: {unknown}.  "
+            f"Valid class names available on the loaded model: {sorted(model_names)}"
+        )
 
 
-def _create_detector(
-    config: AppConfig,
-    loaded_model: object,
-) -> IDetector:
-    """Construct an ``IDetector`` via the factory, falling back to a stub.
+# ---------------------------------------------------------------------------
+# Component construction helpers
+# ---------------------------------------------------------------------------
+
+
+def _create_detector(config: AppConfig, loaded_model: object) -> IDetector:
+    """Construct an ``IDetector`` via ``DetectorFactory``.
 
     Args:
         config: Validated application configuration.
-        loaded_model: Already-loaded model object (never loaded inside the
-            factory).
+        loaded_model: Already-loaded YOLO model object.
 
     Returns:
-        An ``IDetector`` implementation.
+        A ``Yolo26Detector`` instance satisfying ``IDetector``.
     """
     factory = DetectorFactory(
         confidence_threshold=config.detection.confidence_threshold,
         classes=config.detection.classes,
+        imgsz=config.detection.imgsz,
     )
-    try:
-        return factory.create(config.detection.model_variant, loaded_model)
-    except NotImplementedError:
-        # TODO(T19): remove this fallback once DetectorFactory.create() wires
-        # Yolo26Detector (T14).
-        return _StubDetector()
+    return factory.create(config.detection.model_variant, loaded_model)
 
 
-def _create_tracker(
-    config: AppConfig,
-    loaded_tracker: object,
-) -> ITracker:
-    """Construct an ``ITracker`` via the factory, falling back to a stub.
+def _create_tracker(config: AppConfig, fps: float) -> ITracker:
+    """Construct an ``ITracker`` via ``TrackerFactory``.
 
     Args:
         config: Validated application configuration.
-        loaded_tracker: Already-initialised tracker backend (never created
-            inside the factory).
+        fps: Video frame rate used to calibrate the tracker's internal buffer.
 
     Returns:
-        An ``ITracker`` implementation.
+        A ``ByteTrackWrapper`` instance satisfying ``ITracker``.
     """
     factory = TrackerFactory(
         track_thresh=config.tracker.track_thresh,
         match_thresh=config.tracker.match_thresh,
         track_buffer=config.tracker.track_buffer,
+        frame_rate=max(1, round(fps)),
     )
-    try:
-        return factory.create(config.tracker.type, loaded_tracker)
-    except NotImplementedError:
-        # TODO(T19): remove this fallback once TrackerFactory.create() wires
-        # ByteTrackWrapper (T15).
-        return _StubTracker()
+    # ByteTrackWrapper is self-contained (no pre-loaded external object needed).
+    return factory.create(config.tracker.type, None)
+
+
+def _create_video_writer(
+    config: AppConfig,
+    frame_source: OpenCvFrameSource,
+) -> cv2.VideoWriter:
+    """Create and return a configured ``cv2.VideoWriter``.
+
+    Args:
+        config: Validated application configuration.
+        frame_source: Already-opened frame source, used to read FPS and frame size.
+
+    Returns:
+        An opened ``cv2.VideoWriter`` ready to receive annotated frames.
+
+    Raises:
+        RuntimeError: If the VideoWriter cannot be opened.
+    """
+    output_path = config.visualization.output_video
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    fps = frame_source.get_fps()
+    width, height = frame_source.get_frame_size()
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
+    writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    if not writer.isOpened():
+        raise RuntimeError(
+            f"cv2.VideoWriter could not be opened for path '{output_path}'.  "
+            "Check that the output directory exists and the codec is available."
+        )
+    return writer
 
 
 # ---------------------------------------------------------------------------
@@ -242,42 +194,71 @@ def build_pipeline(config_path: str) -> PipelineController:
     :class:`~mot_counting.controllers.pipeline_controller.PipelineController`.
     Callers must not instantiate concrete detector/tracker classes directly.
 
+    Wiring sequence (§4.6):
+
+    1. Load and validate the YAML config.
+    2. Load the Ultralytics YOLO26 model object (once).
+    3. Validate configured class names against ``model.names`` — fail fast on mismatch.
+    4. Open the video via ``OpenCvFrameSource`` (provides FPS and frame dimensions).
+    5. Construct ``Yolo26Detector``, ``ByteTrackWrapper``, ``CrossingLogic``,
+       ``CsvEventRepository``, ``OpenCvVisualizer`` via factories / constructors.
+    6. Subscribe ``LoggerObserver`` and ``OpenCvVisualizer`` to the ``Subject``.
+    7. Create ``cv2.VideoWriter`` for annotated output.
+    8. Construct and return ``PipelineController`` with all dependencies injected.
+
     Args:
-        config_path: Path to a YAML configuration file (e.g.
-            ``"configs/ci.yaml"``).
+        config_path: Path to a YAML configuration file (e.g. ``"configs/ci.yaml"``).
 
     Returns:
         A :class:`~mot_counting.controllers.pipeline_controller.PipelineController`
         with all dependencies injected via their ``abc.ABC`` interfaces.
+
+    Raises:
+        FileNotFoundError: If the config file or video file cannot be found.
+        ValueError: If a configured class name is absent from the loaded model.
+        RuntimeError: If the YOLO model or VideoWriter cannot be opened.
     """
+    # -- 1. Load config -------------------------------------------------------
     config = load_config(config_path)
 
+    # Configure root logging once at startup (§12.2).
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+    )
+
+    # -- 2. Load YOLO26 model (§4.1) -----------------------------------------
     loaded_detector_model = _load_detector_model(config)
+
+    # -- 3. Class-list fail-fast validation (§4.1, §7.1) ---------------------
     _validate_classes_against_model(config, loaded_detector_model)
 
-    loaded_tracker_backend = _load_tracker_backend(config)
+    # -- 4. Open video frame source (needed for FPS + frame size) ------------
+    frame_source = OpenCvFrameSource(config.video.path)
+    fps = frame_source.get_fps()
 
+    # -- 5. Construct pipeline components ------------------------------------
     detector = _create_detector(config, loaded_detector_model)
-    tracker = _create_tracker(config, loaded_tracker_backend)
+    tracker = _create_tracker(config, fps)
+    crossing_logic = CrossingLogic(
+        lines=config.lines,
+        config=config.crossing_logic,
+        fps=fps,
+    )
+    event_repository = CsvEventRepository(config.events.output_csv)
+    visualizer = OpenCvVisualizer(lines=config.lines)
 
-    # TODO(T11): replace _StubCrossingLogic with real CrossingLogic(config).
-    crossing_logic: ICrossingLogic = _StubCrossingLogic()
-
-    # TODO(T12): replace _StubEventRepository with CsvEventRepository(config.events.output_csv).
-    event_repository: IEventRepository = _StubEventRepository()
-
-    # TODO(T17): replace _StubVisualizer with concrete IVisualizer implementation.
-    visualizer: IVisualizer = _StubVisualizer()
-
-    # TODO(T13): replace _StubFrameSource with OpenCV-backed video reader
-    # using config.video.path.
-    frame_source: IFrameSource = _StubFrameSource()
-
+    # -- 6. Observer subscriptions (§4.3, §10.7, §10.8) ----------------------
     subject = Subject()
-    # TODO(T16): subject.subscribe(Logger(...))
-    # TODO(T17): subject.subscribe(VisualizerObserver(...))  — if distinct from IVisualizer
+    log_observer = LoggerObserver()
+    subject.subscribe(log_observer)
+    subject.subscribe(visualizer)
 
-    return PipelineController(
+    # -- 7. VideoWriter for annotated output (§7.6) --------------------------
+    video_writer = _create_video_writer(config, frame_source)
+
+    # -- 8. Assemble controller ----------------------------------------------
+    controller = PipelineController(
         config=config,
         frame_source=frame_source,
         detector=detector,
@@ -286,4 +267,8 @@ def build_pipeline(config_path: str) -> PipelineController:
         event_repository=event_repository,
         visualizer=visualizer,
         subject=subject,
+        video_writer=video_writer,
     )
+
+    log_observer.log_run_start(video_path=config.video.path)
+    return controller

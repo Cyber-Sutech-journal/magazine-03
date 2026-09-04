@@ -47,39 +47,197 @@ The controller never imports concrete YOLO or ByteTrack classes.
 
 ## Installation
 
-### Native (uv recommended)
+**Default path for everyone (Windows, macOS, Linux):** native Python **or** the
+**CPU Docker** profile. Both produce the same outputs. CUDA GPU Docker is
+optional and only works where Docker can see an NVIDIA GPU.
 
-```bash
-# Clone the repository
+| Machine | Recommended | GPU Docker (`--gpus all`) |
+|---|---|---|
+| Windows, macOS, Linux (no NVIDIA, or Apple Silicon) | Native install **or** `docker-compose.cpu.yml` | No — Docker has no NVIDIA device |
+| Windows or Linux with NVIDIA GPU | Either profile; GPU is faster, not more correct | Yes — Docker Desktop (WSL2) or nvidia-container-toolkit |
+
+All commands below are run from `projects/artificial-intelligence/`
+(the folder that contains `pyproject.toml`, `configs/`, and `Dockerfile`).
+
+---
+
+### Native — Windows (PowerShell)
+
+Requires [Python 3.10+](https://www.python.org/downloads/) (3.12 recommended).
+In PowerShell, quote `".[dev]"` so `[dev]` is not treated as a wildcard.
+
+```powershell
 git clone https://github.com/Cyber-Sutech-journal/magazine-03
-cd projects/artificial-intelligence/src/mot_counting
+cd magazine-03\projects\artificial-intelligence
 
-# Create and activate a virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+# If activation is blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
-# Install the package with dev dependencies
-cd ...
 pip install -e ".[dev]"
-
-# Install the pre-commit hooks (required for all contributors)
 pre-commit install
+
+python -c "from ultralytics import YOLO; YOLO('yolo26n.pt'); YOLO('yolo26m.pt')"
+
+python scripts\run_pipeline.py --config configs\ci.yaml
 ```
 
-### Docker — CPU profile
+---
+
+### Native — macOS / Linux (bash or zsh)
 
 ```bash
-docker compose -f docker-compose.cpu.yml up
+git clone https://github.com/Cyber-Sutech-journal/magazine-03
+cd magazine-03/projects/artificial-intelligence
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -e ".[dev]"
+pre-commit install
+
+python -c "from ultralytics import YOLO; YOLO('yolo26n.pt'); YOLO('yolo26m.pt')"
+
+python scripts/run_pipeline.py --config configs/ci.yaml
 ```
 
-### Docker — GPU profile (CUDA required)
+Optional faster install with [uv](https://docs.astral.sh/uv/):  
+`uv venv && uv pip install -e ".[dev]"` (same quote rule on Windows PowerShell).
+
+---
+
+### Docker — CPU profile (Windows, macOS, Linux)
+
+This is the portable Docker path. No NVIDIA GPU is required.
+Install [Docker Desktop](https://docs.docker.com/get-docker/) (Windows/macOS)
+or Docker Engine (Linux). Compose V2 is included as `docker compose`.
+
+**Before the first `docker compose build`:** `yolo26n.pt` and `yolo26m.pt` must
+exist in this folder (they are copied into the image). If you already ran the
+native install above, they are there. Otherwise:
 
 ```bash
-docker compose -f docker-compose.gpu.yml up
+pip install ultralytics
+python -c "from ultralytics import YOLO; YOLO('yolo26n.pt'); YOLO('yolo26m.pt')"
 ```
 
-Both Docker profiles mount `configs/`, `data/`, and `outputs/` from the host.
-YOLO26 model weights are baked into the image at build time for full reproducibility.
+```bash
+docker compose -f docker-compose.cpu.yml build pipeline
+```
+
+Confirm weights are inside the image (this runs `ls` *inside* the Linux
+container, so the same command works on Windows):
+
+```bash
+docker run --rm --entrypoint ls mot-counting:cpu -lh /app/yolo26n.pt /app/yolo26m.pt
+```
+
+Run the pipeline (one line — works in PowerShell, cmd, bash, and zsh):
+
+```bash
+docker compose -f docker-compose.cpu.yml run --rm pipeline --config configs/ci.yaml
+```
+
+Published evaluation config:
+
+```bash
+docker compose -f docker-compose.cpu.yml run --rm pipeline --config configs/default.yaml
+```
+
+Override the video file without editing YAML:
+
+```bash
+docker compose -f docker-compose.cpu.yml run --rm pipeline --config configs/default.yaml --video data/my_clip.mp4
+```
+
+Outputs land on the host at `outputs/annotated.mp4` and `outputs/events.csv`.
+
+Unit tests in Docker:
+
+```bash
+docker compose -f docker-compose.cpu.yml run --rm tests
+```
+
+---
+
+### Docker — GPU profile (optional, NVIDIA only)
+
+CUDA is **speed only**; counts and events must match the CPU profile (§11).
+
+**Do not use `--gpus all` on macOS or on any PC without an NVIDIA GPU.**
+That flag fails with `could not select device driver ... capabilities: [[gpu]]`.
+Use the CPU profile instead.
+
+**Where `--gpus all` is valid**
+
+- Linux: NVIDIA driver ≥ 545, plus
+  [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+- Windows: NVIDIA GPU + Docker Desktop with the WSL2 backend and GPU support enabled.
+
+Check (Linux / Windows+WSL2 only):
+
+```bash
+docker run --gpus all --rm nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+Build (CUDA base image is `linux/amd64`; first build is large and slow):
+
+```bash
+docker compose -f docker-compose.gpu.yml build pipeline
+```
+
+Run **with** GPU (NVIDIA host only):
+
+```bash
+docker compose -f docker-compose.gpu.yml run --rm --gpus all pipeline --config configs/ci.yaml
+```
+
+Run the CUDA image **without** a GPU (CPU fallback; useful as a smoke test).
+On Apple Silicon this uses `linux/amd64` emulation and may print an NNPACK
+warning — that is harmless if the run finishes:
+
+```bash
+docker compose -f docker-compose.gpu.yml run --rm pipeline --config configs/ci.yaml
+```
+
+---
+
+## Continuous integration
+
+Every pull request into `ai-develop` must pass GitHub Actions before merge
+(§15.3). The workflow file is `.github/workflows/ai-ci.yml` at the
+**magazine-03 repository root** (this project is a subdirectory).
+
+Jobs (each fails independently so the red X is readable):
+
+1. **Lint and format (Ruff)** — `ruff check` and `ruff format --check`
+2. **Type check (mypy)** — `mypy src/mot_counting` (mypy, not pyright)
+3. **Unit tests (pytest)** — `pytest tests/unit/`
+4. **Docker CPU integration test** — build the CPU image and run
+   `configs/ci.yaml` on `data/ci_sample_clip.mp4` (synthetic clip; see
+   [`docs/ci-sample-clip.md`](docs/ci-sample-clip.md)). GPU is not run in CI.
+
+If a job fails, open it and read the last step **How to fix this job**.
+
+---
+
+### Evaluating results
+
+```bash
+python scripts/evaluate.py \
+    --predictions outputs/events.csv \
+    --ground-truth data/ground_truth.csv
+
+# Optional: override temporal matching tolerance
+python scripts/evaluate.py \
+    --predictions outputs/events.csv \
+    --ground-truth data/ground_truth.csv \
+    --tolerance-seconds 0.5
+```
+
+See [`docs/evaluation-protocol.md`](docs/evaluation-protocol.md) for matching
+rules, metric definitions, and how to create ground-truth annotations with
+`scripts/annotate_ground_truth.py`.
 
 ---
 
@@ -135,15 +293,28 @@ python scripts/run_pipeline.py --config configs/default.yaml --video path/to/vid
 # Evaluate against ground truth
 python scripts/evaluate.py \
     --predictions outputs/events.csv \
-    --ground-truth data/ground_truth.csv \
-    --tolerance-seconds 1.0
+    --ground-truth data/ground_truth.csv
 ```
 
-**Docker (CPU):**
+`--tolerance-seconds` optionally overrides the inclusive matching tolerance. When omitted, the
+evaluator loads `evaluation.matching_tolerance_seconds` from the project-local
+`configs/default.yaml`, even when invoked from another working directory. Use `--output-dir` to
+choose where `evaluation_summary.csv` and `evaluation_matches.csv` are written; without it, the
+artifacts are written alongside the predictions CSV. See
+[`docs/evaluation-protocol.md`](docs/evaluation-protocol.md) for matching and metric definitions.
+
+**Docker (CPU — all platforms):**
 
 ```bash
-docker compose -f docker-compose.cpu.yml run mot-counting \
-    python scripts/run_pipeline.py --config configs/default.yaml
+docker compose -f docker-compose.cpu.yml build pipeline
+docker compose -f docker-compose.cpu.yml run --rm pipeline --config configs/default.yaml
+```
+
+**Docker (GPU — NVIDIA Linux or Windows+WSL2 only):**
+
+```bash
+docker compose -f docker-compose.gpu.yml build pipeline
+docker compose -f docker-compose.gpu.yml run --rm --gpus all pipeline --config configs/default.yaml
 ```
 
 ---
@@ -168,3 +339,48 @@ independently comply with its AGPL-3.0 license (or obtain your own Ultralytics E
 License). This is independent of this project's MIT license.
 
 For the full AGPL-3.0 text, see: <https://www.gnu.org/licenses/agpl-3.0.html>
+
+## Ground Truth Annotation Tool
+Use `scripts/annotate_ground_truth.py` to create manual ground-truth
+annotations for video line-crossing events.
+
+### Frame Accuracy & Seeking Behavior
+To prevent frame drift and codec decoding inaccuracies (especially on inter-frame compressed video like H.264), the tool relies on sequential reading (`capture.read()`) during normal playback and forward steps. Seeking (`CAP_PROP_POS_FRAMES`) is only performed when stepping backward or jumping.
+
+### Usage
+
+**Linux / macOS (Bash):**
+```bash
+python ./scripts/annotate_ground_truth.py \
+ --video "./path/to/clip.mp4" \
+ --output "./path/to/ground_truth.csv" 
+```
+
+**Windows (PowerShell):**
+```powershell
+python .\scripts\annotate_ground_truth.py `
+--video ".\path\to\clip.mp4" `
+--output ".\path\to\ground_truth.csv" 
+```
+
+### Keyboard controls
+| Key | Action |
+| --- | --- |
+| `Space` | Pause or resume video playback |
+| `Right Arrow` | Move one frame forward and pause |
+| `Left Arrow` | Move one frame backward and pause |
+| `M` | Mark a crossing on the currently displayed frame |
+| `U` | Remove the most recently added annotation |
+| `Q` or `Esc` | Save annotations and exit |
+
+When marking a crossing, the tool prompts for:
+- `class_name`
+- `direction` (`IN` or `OUT`)
+- `line_id`
+
+### Output CSV schema
+frame_idx,timestamp_seconds,class_name,direction,line_id,video_name
+
+- `frame_idx` is zero-based.
+- `timestamp_seconds` is calculated as `frame_idx / FPS`.
+-  Each marked crossing creates exactly one CSV row.

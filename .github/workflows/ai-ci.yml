@@ -1,0 +1,207 @@
+# AI pipeline CI (§12.4, §15.3, §15.4 / T21)
+#
+# Runs on every push and pull request targeting `ai-develop`.
+# Working directory is projects/artificial-intelligence/.
+#
+# Four separate jobs so a red X points at one skill (lint vs types vs tests vs Docker).
+# GPU Docker is intentionally omitted — GitHub-hosted runners have no NVIDIA GPU.
+
+name: AI pipeline CI
+
+on:
+  push:
+    branches: [ai-develop]
+  pull_request:
+    branches: [ai-develop]
+
+concurrency:
+  group: ai-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: projects/artificial-intelligence
+    shell: bash
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  lint-and-format:
+    name: Lint and format (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ruff (same pin as pyproject.toml)
+        run: pip install "ruff==0.16.4"
+
+      - name: ruff check (lint)
+        run: ruff check src tests scripts
+
+      - name: ruff format --check (formatting; does not rewrite files)
+        run: ruff format --check src tests scripts
+
+      - name: How to fix this job
+        if: failure()
+        run: |
+          echo "::error::Ruff failed. In projects/artificial-intelligence run: pip install ruff==0.16.4 && ruff check --fix src tests scripts && ruff format src tests scripts"
+
+  type-check:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: projects/artificial-intelligence/pyproject.toml
+
+      - name: Install the package with dev extras (includes mypy)
+        run: pip install -e ".[dev]"
+
+      - name: mypy src/mot_counting
+        run: mypy src/mot_counting
+
+      - name: How to fix this job
+        if: failure()
+        run: |
+          echo "::error::mypy failed. Open the file:line in the log above. Config lives in pyproject.toml under [tool.mypy]. Run locally: pip install -e '.[dev]' && mypy src/mot_counting"
+
+  unit-tests:
+    name: Unit tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: projects/artificial-intelligence/pyproject.toml
+
+      - name: Restore cached YOLO26 weights (needed by composition_root unit tests)
+        uses: actions/cache@v4
+        with:
+          path: |
+            projects/artificial-intelligence/yolo26n.pt
+            projects/artificial-intelligence/yolo26m.pt
+          key: yolo26-weights-n-m-v1
+
+      - name: Install the package with dev extras
+        run: pip install -e ".[dev]"
+
+      - name: Download YOLO26 weights if the cache was empty
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from ultralytics import YOLO
+
+          for name in ("yolo26n.pt", "yolo26m.pt"):
+              if not Path(name).is_file():
+                  print(f"Downloading {name} …")
+                  YOLO(name)
+              else:
+                  print(f"{name} already present")
+          PY
+
+      - name: pytest tests/unit
+        run: python -m pytest tests/unit/ -v --tb=short
+
+      - name: How to fix this job
+        if: failure()
+        run: |
+          echo "::error::A unit test failed. Scroll to the FAILED line above. Run the same file locally: python -m pytest tests/unit/<that_file>.py -v"
+
+  docker-cpu-integration:
+    name: Docker CPU integration test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Confirm the synthetic CI clip is in the repo
+        run: |
+          test -s data/ci_sample_clip.mp4
+          echo "CI clip present ($(wc -c < data/ci_sample_clip.mp4) bytes). Provenance: docs/ci-sample-clip.md"
+
+      - name: Set up Python 3.12 (only used to fetch weight files for docker build)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: projects/artificial-intelligence/pyproject.toml
+
+      - name: Restore cached YOLO26 weights (copied into the image at docker build)
+        uses: actions/cache@v4
+        with:
+          path: |
+            projects/artificial-intelligence/yolo26n.pt
+            projects/artificial-intelligence/yolo26m.pt
+          key: yolo26-weights-n-m-v1
+
+      - name: Download YOLO26 weights if the cache was empty
+        run: |
+          pip install "ultralytics==8.4.128"
+          python - <<'PY'
+          from pathlib import Path
+          from ultralytics import YOLO
+
+          for name in ("yolo26n.pt", "yolo26m.pt"):
+              if not Path(name).is_file():
+                  print(f"Downloading {name} …")
+                  YOLO(name)
+              else:
+                  print(f"{name} already present")
+          PY
+
+      - name: Set up Docker Buildx (enables GitHub Actions layer cache)
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CPU image with layer cache
+        uses: docker/build-push-action@v6
+        with:
+          context: projects/artificial-intelligence
+          file: projects/artificial-intelligence/Dockerfile
+          load: true
+          tags: mot-counting:cpu
+          cache-from: type=gha,scope=mot-counting-cpu
+          cache-to: type=gha,mode=max,scope=mot-counting-cpu
+          build-args: |
+            BASE_IMAGE=python:3.12-slim
+            TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+      - name: Run the full pipeline inside Docker against configs/ci.yaml
+        run: |
+          mkdir -p outputs
+          docker run --rm \
+            -v "$PWD/configs:/app/configs:ro" \
+            -v "$PWD/data:/app/data:ro" \
+            -v "$PWD/outputs:/app/outputs" \
+            mot-counting:cpu \
+            --config configs/ci.yaml
+
+      - name: Check annotated video and events.csv were written
+        run: |
+          test -s outputs/annotated.mp4
+          test -s outputs/events.csv
+          echo "annotated.mp4 $(wc -c < outputs/annotated.mp4) bytes"
+          echo "events.csv header: $(head -n 1 outputs/events.csv)"
+
+      - name: How to fix this job
+        if: failure()
+        run: |
+          echo "::error::Docker CPU integration failed. Common causes: missing data/ci_sample_clip.mp4, missing yolo26n.pt/yolo26m.pt in the build context, or the pipeline crashing. Reproduce locally: docker compose -f docker-compose.cpu.yml build pipeline && docker compose -f docker-compose.cpu.yml run --rm pipeline --config configs/ci.yaml"
