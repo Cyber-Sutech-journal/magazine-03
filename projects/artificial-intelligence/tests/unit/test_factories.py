@@ -35,7 +35,7 @@ class _FakeModel:
 
 
 def _detector_factory() -> DetectorFactory:
-    return DetectorFactory(confidence_threshold=0.4, classes=["person", "car"])
+    return DetectorFactory(confidence_threshold=0.4, classes=["person", "car"], imgsz=640)
 
 
 def _tracker_factory() -> TrackerFactory:
@@ -72,12 +72,13 @@ def test_detector_factory_known_variant_returns_idetector(variant: str) -> None:
 
 
 def test_detector_factory_passes_config_to_yolo26_detector() -> None:
-    """Confidence threshold and class list must be forwarded to the detector."""
-    factory = DetectorFactory(confidence_threshold=0.7, classes=["truck"])
+    """Confidence, class list, and configured imgsz must reach the detector."""
+    factory = DetectorFactory(confidence_threshold=0.7, classes=["truck"], imgsz=320)
     detector = factory.create("yolo26m", _FakeModel())
     assert isinstance(detector, Yolo26Detector)
     assert detector.confidence_threshold == 0.7
     assert detector.allowed_classes == ["truck"]
+    assert detector.imgsz == 320
 
 
 # ---------------------------------------------------------------------------

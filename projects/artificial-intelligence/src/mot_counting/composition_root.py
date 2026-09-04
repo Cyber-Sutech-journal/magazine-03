@@ -126,6 +126,7 @@ def _create_detector(config: AppConfig, loaded_model: object) -> IDetector:
     factory = DetectorFactory(
         confidence_threshold=config.detection.confidence_threshold,
         classes=config.detection.classes,
+        imgsz=config.detection.imgsz,
     )
     return factory.create(config.detection.model_variant, loaded_model)
 

@@ -30,20 +30,26 @@ class DetectorFactory:
     Usage (composition root)::
 
         raw_model = YOLO("yolo26m.pt")        # loaded once, outside this Factory
-        factory = DetectorFactory(config)
+        factory = DetectorFactory(
+            confidence_threshold=config.detection.confidence_threshold,
+            classes=config.detection.classes,
+            imgsz=config.detection.imgsz,
+        )
         detector: IDetector = factory.create("yolo26m", raw_model)
     """
 
-    def __init__(self, confidence_threshold: float, classes: list[str]) -> None:
+    def __init__(self, confidence_threshold: float, classes: list[str], imgsz: int) -> None:
         """Initialise the factory with detection filter parameters.
 
         Args:
             confidence_threshold: Global confidence threshold forwarded to the
                 concrete detector at construction time.
             classes: List of class-name strings the detector should keep.
+            imgsz: Inference image size forwarded from ``detection.imgsz``.
         """
         self._confidence_threshold = confidence_threshold
         self._classes = classes
+        self._imgsz = imgsz
 
     def create(self, model_variant: str, loaded_model: object) -> IDetector:
         """Wrap *loaded_model* into the ``IDetector`` matching *model_variant*.
@@ -76,7 +82,7 @@ class DetectorFactory:
 
             return Yolo26Detector(
                 model=loaded_model,
-                imgsz=640,
+                imgsz=self._imgsz,
                 confidence_threshold=self._confidence_threshold,
                 allowed_classes=self._classes,
             )

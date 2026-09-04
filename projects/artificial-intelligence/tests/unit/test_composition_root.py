@@ -35,6 +35,8 @@ def test_build_pipeline_ci_config_loads_expected_detection_settings() -> None:
 
     assert controller.config.detection.model_variant == "yolo26n"
     assert controller.config.video.path == "data/ci_sample_clip.mp4"
+    assert controller.config.detection.imgsz == 640
+    assert controller._detector.imgsz == controller.config.detection.imgsz  # noqa: SLF001
 
 
 def test_build_pipeline_exposes_interface_typed_dependencies() -> None:
