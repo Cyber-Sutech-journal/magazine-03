@@ -19,8 +19,10 @@ class IFrameSource(ABC):
         Returns:
             A ``(success, frame)`` tuple.  When ``success`` is ``True``,
             ``frame`` is a BGR NumPy array with shape ``(H, W, 3)`` and dtype
-            ``uint8``.  When ``success`` is ``False`` (end of video or read
-            error), ``frame`` is ``None``.
+            ``uint8``.  When ``success`` is ``False`` and ``frame`` is ``None``,
+            the source has reached end-of-video.  When ``success`` is ``False``
+            and ``frame`` is not ``None``, a single frame failed to decode and
+            the caller should skip it and continue (§12.1).
         """
 
     @abstractmethod

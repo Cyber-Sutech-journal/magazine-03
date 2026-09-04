@@ -19,6 +19,9 @@ class OpenCvFrameSource(IFrameSource):
     # 25-30 FPS. Setting 30.0 FPS provides a standardized baseline and minimizes drift
     # when converting cooldown and stale-timeout thresholds from seconds to frames downstream.
     DEFAULT_FPS: float = 30.0
+    # Non-None sentinel returned with success=False so PipelineController can
+    # skip a recoverable decode failure instead of treating it as EOF (§12.1).
+    _DECODE_FAILURE_FRAME: np.ndarray = np.empty((0, 0, 3), dtype=np.uint8)
 
     def __init__(self, video_path: str | Path) -> None:
         """Open a video file and fail fast if it cannot be accessed.
@@ -44,14 +47,22 @@ class OpenCvFrameSource(IFrameSource):
     def read(self) -> tuple[bool, np.ndarray | None]:
         """Read the next frame from the video source.
 
-        Returns:
-            A ``(success, frame)`` tuple. At end-of-video or upon read error,
-            returns ``(False, None)``.
-        """
-        success, frame = self._capture.read()
+        Distinguishes end-of-video from a recoverable decode failure using
+        OpenCV's grab/retrieve split: ``grab()`` failing is EOF;
+        ``grab()`` succeeding but ``retrieve()`` failing is a skippable frame.
 
-        if not success or frame is None:
+        Returns:
+            ``(True, frame)`` on a successful decode.
+            ``(False, None)`` at natural end-of-video.
+            ``(False, sentinel)`` when one frame could not be decoded.
+        """
+        grabbed = self._capture.grab()
+        if not grabbed:
             return False, None
+
+        retrieved, frame = self._capture.retrieve()
+        if not retrieved or frame is None:
+            return False, self._DECODE_FAILURE_FRAME
 
         return True, frame
 

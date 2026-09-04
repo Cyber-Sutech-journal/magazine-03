@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 import pytest
 
@@ -19,6 +20,7 @@ from mot_counting.interfaces.tracker import ITracker
 from mot_counting.interfaces.visualizer import IVisualizer
 from mot_counting.observers.base import Subject
 from mot_counting.types import CrossingEvent, Detection, Direction, Track
+from mot_counting.utils.video_io import OpenCvFrameSource
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -265,6 +267,37 @@ def test_mid_stream_decode_failure_skips_frame_and_continues(
     assert controller.stats.frames_skipped == 1
     assert any("decode failure" in r.message.lower() for r in caplog.records)
     assert mocks["detector"].predict.call_count == 2
+
+
+def test_concrete_source_skips_decode_failure_then_counts_eof(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """OpenCvFrameSource: valid → grab-ok/retrieve-fail → valid → EOF."""
+    frame_a = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame_b = np.ones((480, 640, 3), dtype=np.uint8)
+
+    with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+        source = OpenCvFrameSource()
+    capture = MagicMock()
+    capture.grab.side_effect = [True, True, True, False]
+    capture.retrieve.side_effect = [(True, frame_a), (False, None), (True, frame_b)]
+    capture.get.side_effect = lambda prop: {
+        cv2.CAP_PROP_FPS: 30.0,
+        cv2.CAP_PROP_FRAME_WIDTH: 640.0,
+        cv2.CAP_PROP_FRAME_HEIGHT: 480.0,
+    }.get(prop, 0.0)
+    source._capture = capture
+
+    controller, _mocks = _make_controller(frames=[])
+    controller._frame_source = source  # noqa: SLF001
+
+    with caplog.at_level(logging.WARNING):
+        controller.run()
+
+    assert controller.stats.frames_processed == 2
+    assert controller.stats.frames_skipped == 1
+    capture.release.assert_called()
+    assert any("decode failure" in r.message.lower() for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
