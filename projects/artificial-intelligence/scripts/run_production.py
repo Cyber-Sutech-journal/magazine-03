@@ -15,14 +15,20 @@ Usage (native)::
 Usage (Docker CPU)::
 
     docker run --rm \\
+        --entrypoint python \\
         -v "$(pwd)/configs:/app/configs:ro" \\
         -v "$(pwd)/data:/app/data:ro" \\
         -v "$(pwd)/outputs:/app/outputs" \\
         mot-counting:cpu \\
-        python scripts/run_production.py \\
+        scripts/run_production.py \\
             --config configs/production.yaml \\
             --clips data/clip_a.mp4 \\
             --output-root outputs/production
+
+The image ENTRYPOINT is ``python scripts/run_pipeline.py``.  Tokens after the
+image name are appended to that entrypoint unless ``--entrypoint`` replaces
+it.  The command above therefore execs ``python scripts/run_production.py …``
+instead of ``python scripts/run_pipeline.py python scripts/run_production.py …``.
 """
 
 from __future__ import annotations
@@ -34,10 +40,25 @@ import platform
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
+
+# Dockerfile ENTRYPOINT ["python", "scripts/run_pipeline.py"].  Extra docker-run
+# tokens are appended to this unless ``--entrypoint`` replaces it.
+IMAGE_PIPELINE_ENTRYPOINT: tuple[str, ...] = ("python", "scripts/run_pipeline.py")
+DOCUMENTED_ENTRYPOINT_OVERRIDE: tuple[str, ...] = ("python",)
+DOCUMENTED_PRODUCTION_COMMAND: tuple[str, ...] = (
+    "scripts/run_production.py",
+    "--config",
+    "configs/production.yaml",
+    "--clips",
+    "data/clip_a.mp4",
+    "--output-root",
+    "outputs/production",
+)
 
 _SRC = Path(__file__).parent.parent / "src"
 if str(_SRC) not in sys.path:
@@ -48,6 +69,23 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-7s %(name)s — %(message)s",
 )
 _log = logging.getLogger(__name__)
+
+
+def compose_container_argv(
+    command: Sequence[str],
+    *,
+    image_entrypoint: Sequence[str] = IMAGE_PIPELINE_ENTRYPOINT,
+    entrypoint_override: Sequence[str] | None = None,
+) -> list[str]:
+    """Return the argv Docker would exec for *command* given the image ENTRYPOINT.
+
+    With no override, *command* is appended to ``IMAGE_PIPELINE_ENTRYPOINT``.
+    Passing ``entrypoint_override`` replaces the ENTRYPOINT (``docker run
+    --entrypoint``).
+    """
+    if entrypoint_override is not None:
+        return [*entrypoint_override, *command]
+    return [*image_entrypoint, *command]
 
 
 # ---------------------------------------------------------------------------
