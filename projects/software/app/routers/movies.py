@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPEException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
+from app.models.movie import Movie, Hall, Showtime
 
 from app.schemas.movie import (
     MovieCreate,
