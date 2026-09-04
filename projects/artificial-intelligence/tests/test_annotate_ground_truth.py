@@ -11,8 +11,10 @@ from scripts.annotate_ground_truth import (
     KEY_LEFT_CODES,
     KEY_RIGHT_CODES,
     AnnotationEvent,
+    annotation_wait_delay_ms,
     calculate_timestamp,
     normalize_key,
+    resolve_annotation_fps,
     save_events_to_csv,
 )
 
@@ -24,6 +26,9 @@ def test_calculate_timestamp() -> None:
 def test_calculate_timestamp_with_invalid_fps() -> None:
     assert calculate_timestamp(frame_idx=10, fps=0.0) == 0.0
     assert calculate_timestamp(frame_idx=10, fps=-1.0) == 0.0
+    assert calculate_timestamp(frame_idx=10, fps=float("nan")) == 0.0
+    assert calculate_timestamp(frame_idx=10, fps=float("inf")) == 0.0
+    assert calculate_timestamp(frame_idx=10, fps=float("-inf")) == 0.0
 
 
 def test_annotation_event_stores_expected_values() -> None:
@@ -168,9 +173,24 @@ def test_normalize_key_unhandled_code():
     assert normalize_key(999999) == 999999
 
 
-def test_fps_fallback_when_zero_or_negative():
-    """Verify that non-positive FPS falls back to DEFAULT_FALLBACK_FPS."""
-    raw_fps = 0.0
-    effective_fps = DEFAULT_FALLBACK_FPS if raw_fps is None or raw_fps <= 0 else raw_fps
+@pytest.mark.parametrize(
+    "raw_fps",
+    [0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+    ids=["zero", "negative", "nan", "inf", "neg-inf"],
+)
+def test_annotation_delay_path_falls_back_for_invalid_fps(raw_fps: float) -> None:
+    """Invalid container FPS must resolve before round(1000 / fps) in the loop."""
+    fps = resolve_annotation_fps(raw_fps)
+    assert fps == DEFAULT_FALLBACK_FPS
 
-    assert effective_fps == 25.0
+    delay = annotation_wait_delay_ms(fps, playing=True)
+    assert delay == max(1, round(1000 / DEFAULT_FALLBACK_FPS))
+    assert isinstance(delay, int)
+
+
+def test_annotation_wait_delay_paused_is_zero() -> None:
+    assert annotation_wait_delay_ms(DEFAULT_FALLBACK_FPS, playing=False) == 0
+
+
+def test_annotation_wait_delay_valid_fps() -> None:
+    assert annotation_wait_delay_ms(25.0, playing=True) == 40

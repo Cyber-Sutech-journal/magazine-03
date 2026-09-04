@@ -79,16 +79,18 @@ RUN pip install --no-cache-dir --upgrade pip && \
         "opencv-python==4.11.0.86" \
         "numpy==1.26.4" \
         "pydantic==2.13.4" \
-        "pyyaml==6.0.3"
+        "pyyaml==6.0.3" \
+        "lap==0.5.13"
 
 # 3b. Copy project files needed by setuptools for the editable install.
 COPY README.md LICENSE pyproject.toml ./
 COPY src/ src/
 
-# 3c. Install the project package itself (no-deps: all deps already installed above).
+# 3c. Install the project package itself (no-deps: all runtime deps already
+#     installed above from the canonical pyproject.toml pins).
 #     pytest is included so the Compose `tests` service can run without a rebuild.
 RUN pip install --no-cache-dir -e . --no-deps && \
-    pip install --no-cache-dir "pytest==9.1.1" "lap==0.5.13"
+    pip install --no-cache-dir "pytest==9.1.1"
 
 # ---------------------------------------------------------------------------
 # 4. Copy remaining project files.

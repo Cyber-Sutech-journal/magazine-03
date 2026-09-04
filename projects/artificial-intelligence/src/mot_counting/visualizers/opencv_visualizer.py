@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 import cv2
 import numpy as np
 
 from mot_counting.interfaces.visualizer import IVisualizer
-from mot_counting.types import Track
+from mot_counting.types import CrossingEvent, Track
 
 # Color palette mapped by canonical class name with fallback to class_id
 CLASS_COLORS: dict[str | int, tuple[int, int, int]] = {
@@ -70,6 +72,33 @@ def _parse_line(line: object) -> tuple[tuple[int, int], tuple[int, int], str] | 
     return None
 
 
+def _canonical_direction(direction: object) -> str:
+    """Normalize a Direction enum or string key to ``IN`` / ``OUT``.
+
+    ``ICrossingLogic.get_counters()`` uses ``Direction`` members as the third
+    tuple key.  ``str(Direction.IN)`` is ``'Direction.IN'`` (so ``.upper()``
+    becomes ``'DIRECTION.IN'``), which must not be used as the overlay lookup
+    key.  Enum members are reduced to their ``.value``; plain strings such as
+    ``'in'`` / ``'IN'`` remain supported.
+    """
+    if isinstance(direction, Enum):
+        direction = direction.value
+    return str(direction).strip().upper()
+
+
+def _direction_counts(dirs: dict) -> tuple[int, int]:
+    """Return ``(in_count, out_count)`` from a direction→count mapping."""
+    in_cnt = 0
+    out_cnt = 0
+    for key, count in dirs.items():
+        label = _canonical_direction(key)
+        if label == "IN":
+            in_cnt = int(count)
+        elif label == "OUT":
+            out_cnt = int(count)
+    return in_cnt, out_cnt
+
+
 def format_counters_overlay(counters: dict) -> list[str]:
     """Format counting dictionary into readable text overlay lines.
 
@@ -90,18 +119,19 @@ def format_counters_overlay(counters: dict) -> list[str]:
         for (c_name, l_id, direction), count in counters.items():
             l_id_str = str(l_id)
             c_name_str = str(c_name).capitalize()
-            dir_str = str(direction).upper()
+            dir_str = _canonical_direction(direction)
+            if dir_str not in {"IN", "OUT"}:
+                continue
             if l_id_str not in grouped:
                 grouped[l_id_str] = {}
             if c_name_str not in grouped[l_id_str]:
                 grouped[l_id_str][c_name_str] = {"IN": 0, "OUT": 0}
-            grouped[l_id_str][c_name_str][dir_str] = count
+            grouped[l_id_str][c_name_str][dir_str] = int(count)
 
         for l_id_str in sorted(grouped.keys()):
             lines.append(f"[{l_id_str}]")
             for c_name_str in sorted(grouped[l_id_str].keys()):
-                in_cnt = grouped[l_id_str][c_name_str].get("IN", 0)
-                out_cnt = grouped[l_id_str][c_name_str].get("OUT", 0)
+                in_cnt, out_cnt = _direction_counts(grouped[l_id_str][c_name_str])
                 lines.append(f"  {c_name_str} IN: {in_cnt} OUT: {out_cnt}")
         return lines
 
@@ -112,15 +142,13 @@ def format_counters_overlay(counters: dict) -> list[str]:
             for l_id, sub_dict in counters.items():
                 lines.append(f"[{l_id}]")
                 for c_name, dirs in sub_dict.items():
-                    in_cnt = dirs.get("in", dirs.get("IN", 0))
-                    out_cnt = dirs.get("out", dirs.get("OUT", 0))
+                    in_cnt, out_cnt = _direction_counts(dirs)
                     lines.append(f"  {str(c_name).capitalize()} IN: {in_cnt} OUT: {out_cnt}")
             return lines
 
         # Flat dict: {class_name: {in: x, out: y}}
         for c_name, dirs in counters.items():
-            in_cnt = dirs.get("in", dirs.get("IN", 0))
-            out_cnt = dirs.get("out", dirs.get("OUT", 0))
+            in_cnt, out_cnt = _direction_counts(dirs)
             lines.append(f"{str(c_name).capitalize()} IN: {in_cnt} OUT: {out_cnt}")
         return lines
 
@@ -132,7 +160,12 @@ def format_counters_overlay(counters: dict) -> list[str]:
 
 
 class OpenCvVisualizer(IVisualizer):
-    """Visualizes tracked objects, lines, and counting statistics using OpenCV."""
+    """Visualizes tracked objects, lines, and counting statistics using OpenCV.
+
+    Implements both ``IVisualizer.draw`` and ``Observer.update`` (§4.3, §10.7).
+    Counting-line geometry is fixed at construction; the current raw frame is
+    bound with :meth:`set_frame` immediately before each observer notification.
+    """
 
     def __init__(
         self,
@@ -140,11 +173,14 @@ class OpenCvVisualizer(IVisualizer):
         text_color: tuple[int, int, int] = (255, 255, 255),
         line_thickness: int = 2,
         font_scale: float = 0.6,
+        lines: list | None = None,
     ) -> None:
         self.line_color = line_color
         self.text_color = text_color
         self.line_thickness = line_thickness
         self.font_scale = font_scale
+        self._lines: list = list(lines) if lines is not None else []
+        self._current_frame: np.ndarray | None = None
         self.last_annotated_frame: np.ndarray | None = None
 
     def draw(
@@ -247,15 +283,22 @@ class OpenCvVisualizer(IVisualizer):
 
     def update(
         self,
-        frame: np.ndarray,
-        tracks: list[Track] | None = None,
-        lines: list | None = None,
-        counters: dict | None = None,
+        frame_idx: int,
+        tracks: list[Track],
+        events: list[CrossingEvent],
+        counters: dict,
     ) -> None:
-        """Observer callback; performs rendering and stores output in self.last_annotated_frame."""
+        """Observer callback: render the bound frame and cache the annotated copy.
+
+        ``frame_idx`` and ``events`` are part of the Observer contract and are
+        unused for drawing.  Lines come from construction-time config; the
+        raw frame must have been bound via :meth:`set_frame`.
+        """
+        if self._current_frame is None:
+            return
         self.draw(
-            frame=frame,
-            tracks=tracks if tracks is not None else [],
-            lines=lines if lines is not None else [],
-            counters=counters if counters is not None else {},
+            frame=self._current_frame,
+            tracks=tracks,
+            lines=self._lines,
+            counters=counters,
         )

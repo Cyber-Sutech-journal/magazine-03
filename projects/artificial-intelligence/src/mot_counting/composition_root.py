@@ -14,7 +14,7 @@ All stubs replaced by real implementations:
 - ``Yolo26Detector`` and ``ByteTrackWrapper`` wired via their respective Factories.
 - Real ``CrossingLogic``, ``CsvEventRepository``, ``OpenCvVisualizer``,
   ``OpenCvFrameSource`` injected into ``PipelineController``.
-- ``LoggerObserver`` subscribed to the ``Subject``.
+- ``LoggerObserver`` and ``OpenCvVisualizer`` subscribed to the ``Subject``.
 - ``cv2.VideoWriter`` created and passed to ``PipelineController`` for annotated output.
 """
 
@@ -126,6 +126,7 @@ def _create_detector(config: AppConfig, loaded_model: object) -> IDetector:
     factory = DetectorFactory(
         confidence_threshold=config.detection.confidence_threshold,
         classes=config.detection.classes,
+        imgsz=config.detection.imgsz,
     )
     return factory.create(config.detection.model_variant, loaded_model)
 
@@ -201,7 +202,7 @@ def build_pipeline(config_path: str) -> PipelineController:
     4. Open the video via ``OpenCvFrameSource`` (provides FPS and frame dimensions).
     5. Construct ``Yolo26Detector``, ``ByteTrackWrapper``, ``CrossingLogic``,
        ``CsvEventRepository``, ``OpenCvVisualizer`` via factories / constructors.
-    6. Subscribe ``LoggerObserver`` to the ``Subject``.
+    6. Subscribe ``LoggerObserver`` and ``OpenCvVisualizer`` to the ``Subject``.
     7. Create ``cv2.VideoWriter`` for annotated output.
     8. Construct and return ``PipelineController`` with all dependencies injected.
 
@@ -245,12 +246,13 @@ def build_pipeline(config_path: str) -> PipelineController:
         fps=fps,
     )
     event_repository = CsvEventRepository(config.events.output_csv)
-    visualizer = OpenCvVisualizer()
+    visualizer = OpenCvVisualizer(lines=config.lines)
 
-    # -- 6. Observer subscriptions (§4.3) ------------------------------------
+    # -- 6. Observer subscriptions (§4.3, §10.7, §10.8) ----------------------
     subject = Subject()
     log_observer = LoggerObserver()
     subject.subscribe(log_observer)
+    subject.subscribe(visualizer)
 
     # -- 7. VideoWriter for annotated output (§7.6) --------------------------
     video_writer = _create_video_writer(config, frame_source)

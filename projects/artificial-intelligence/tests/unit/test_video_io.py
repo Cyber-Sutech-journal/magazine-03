@@ -128,6 +128,48 @@ def test_release_is_safe(tmp_path: Path) -> None:
     source.release()
 
 
+def _source_with_mock_capture() -> tuple[OpenCvFrameSource, MagicMock]:
+    """Build an OpenCvFrameSource whose capture object is a controllable mock."""
+    with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+        source = OpenCvFrameSource()
+    capture = MagicMock()
+    source._capture = capture
+    return source, capture
+
+
+def test_read_distinguishes_decode_failure_from_eof_and_continues() -> None:
+    """valid → recoverable failure → valid → EOF must not collapse to EOF."""
+    source, capture = _source_with_mock_capture()
+    frame_a = np.zeros((8, 8, 3), dtype=np.uint8)
+    frame_b = np.ones((8, 8, 3), dtype=np.uint8)
+
+    capture.grab.side_effect = [True, True, True, False]
+    capture.retrieve.side_effect = [
+        (True, frame_a),
+        (False, None),
+        (True, frame_b),
+    ]
+
+    ok, first = source.read()
+    assert ok is True
+    assert first is not None
+    assert np.array_equal(first, frame_a)
+
+    ok, failed = source.read()
+    assert ok is False
+    assert failed is not None
+    assert failed is OpenCvFrameSource._DECODE_FAILURE_FRAME
+
+    ok, second = source.read()
+    assert ok is True
+    assert second is not None
+    assert np.array_equal(second, frame_b)
+
+    ok, eof = source.read()
+    assert ok is False
+    assert eof is None
+
+
 class TestGetFpsFallback:
     """Validate FPS fallback behavior on invalid or non-finite values."""
 

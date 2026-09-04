@@ -86,6 +86,15 @@ class _DummyVisualizer(IVisualizer):
     ) -> np.ndarray:
         return frame.copy()
 
+    def update(
+        self,
+        frame_idx: int,
+        tracks: list[Track],
+        events: list[CrossingEvent],
+        counters: dict,
+    ) -> None:
+        pass
+
 
 class _DummyFrameSource(IFrameSource):
     def read(self) -> tuple[bool, np.ndarray | None]:
@@ -110,7 +119,7 @@ INTERFACE_CASES: list[tuple[type, type, list[str]]] = [
     (ITracker, _DummyTracker, ["update"]),
     (ICrossingLogic, _DummyCrossingLogic, ["process", "get_counters"]),
     (IEventRepository, _DummyEventRepository, ["save", "flush", "close"]),
-    (IVisualizer, _DummyVisualizer, ["draw"]),
+    (IVisualizer, _DummyVisualizer, ["draw", "update"]),
     (IFrameSource, _DummyFrameSource, ["read", "get_fps", "get_frame_size", "release"]),
 ]
 

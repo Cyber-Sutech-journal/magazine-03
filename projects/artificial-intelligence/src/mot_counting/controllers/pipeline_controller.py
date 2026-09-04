@@ -97,11 +97,11 @@ class PipelineController:
             tracker: Multi-object tracker (``ITracker``).
             crossing_logic: Line-crossing state machine (``ICrossingLogic``).
             event_repository: Crossing-event persistence (``IEventRepository``).
-            visualizer: Frame annotator (``IVisualizer``).
+            visualizer: Frame annotator (``IVisualizer`` / ``Observer``).
             subject: Observer subject for Logger/Visualizer side effects.
             video_writer: Optional ``cv2.VideoWriter`` for annotated output video.
-                When provided, ``visualizer.draw()`` is called each frame and
-                the result is written here.  Released in :meth:`cleanup`.
+                When provided, the annotated frame produced by the visualizer
+                Observer is written here.  Released in :meth:`cleanup`.
         """
         self._config = config
         self._frame_source = frame_source
@@ -260,6 +260,7 @@ class PipelineController:
             for event in events:
                 self._event_repository.save(event)
 
+            self._visualizer.set_frame(frame)
             self._subject.notify(
                 frame_idx=frame_idx,
                 tracks=tracks,
@@ -267,16 +268,12 @@ class PipelineController:
                 counters=self._crossing_logic.get_counters(),
             )
 
-            # Visualize and write annotated frame to output video if wired.
+            # Write the Observer-produced annotated frame.  Do not call
+            # visualizer.draw() here — that would duplicate rendering (§4.3).
             if self._video_writer is not None:
                 import numpy as np
 
-                annotated = self._visualizer.draw(
-                    frame=frame,
-                    tracks=tracks,
-                    lines=self._config.lines,
-                    counters=self._crossing_logic.get_counters(),
-                )
+                annotated = getattr(self._visualizer, "last_annotated_frame", None)
                 if isinstance(annotated, np.ndarray):
                     self._video_writer.write(annotated)
 
