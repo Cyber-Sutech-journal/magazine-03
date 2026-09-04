@@ -21,6 +21,8 @@ from mot_counting.types import Track
 class IVisualizer(Observer):
     """Abstract interface for annotating video frames as an Observer."""
 
+    _current_frame: np.ndarray | None = None
+
     def set_frame(self, frame: np.ndarray) -> None:
         """Bind the current raw frame for the next :meth:`Observer.update` call.
 
