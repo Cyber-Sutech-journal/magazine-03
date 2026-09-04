@@ -133,6 +133,8 @@ def _source_with_mock_capture() -> tuple[OpenCvFrameSource, MagicMock]:
     with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
         source = OpenCvFrameSource()
     capture = MagicMock()
+    # Unknown FRAME_COUNT (0) → grab() False is treated as EOF.
+    capture.get.return_value = 0.0
     source._capture = capture
     return source, capture
 
@@ -159,6 +161,57 @@ def test_read_distinguishes_decode_failure_from_eof_and_continues() -> None:
     assert ok is False
     assert failed is not None
     assert failed is OpenCvFrameSource._DECODE_FAILURE_FRAME
+
+    ok, second = source.read()
+    assert ok is True
+    assert second is not None
+    assert np.array_equal(second, frame_b)
+
+    ok, eof = source.read()
+    assert ok is False
+    assert eof is None
+
+
+def test_grab_false_mid_stream_skips_and_reads_later_valid_frame() -> None:
+    """grab() False is not EOF when FRAME_COUNT still reports later frames."""
+    source, capture = _source_with_mock_capture()
+    frame_a = np.zeros((8, 8, 3), dtype=np.uint8)
+    frame_b = np.ones((8, 8, 3), dtype=np.uint8)
+    state = {"pos": 0.0}
+    grab_results = iter([True, False, True, False])
+
+    def grab() -> bool:
+        ok = next(grab_results)
+        if ok:
+            state["pos"] += 1.0
+        return ok
+
+    def cap_get(prop: int) -> float:
+        if prop == cv2.CAP_PROP_FRAME_COUNT:
+            return 3.0
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            return state["pos"]
+        return 0.0
+
+    def cap_set(prop: int, value: float) -> bool:
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            state["pos"] = float(value)
+        return True
+
+    capture.grab.side_effect = grab
+    capture.get.side_effect = cap_get
+    capture.set.side_effect = cap_set
+    capture.retrieve.side_effect = [(True, frame_a), (True, frame_b)]
+
+    ok, first = source.read()
+    assert ok is True
+    assert first is not None
+    assert np.array_equal(first, frame_a)
+
+    ok, failed = source.read()
+    assert ok is False
+    assert failed is OpenCvFrameSource._DECODE_FAILURE_FRAME
+    capture.set.assert_called()
 
     ok, second = source.read()
     assert ok is True

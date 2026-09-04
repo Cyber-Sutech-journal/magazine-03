@@ -47,24 +47,68 @@ class OpenCvFrameSource(IFrameSource):
     def read(self) -> tuple[bool, np.ndarray | None]:
         """Read the next frame from the video source.
 
-        Distinguishes end-of-video from a recoverable decode failure using
-        OpenCV's grab/retrieve split: ``grab()`` failing is EOF;
-        ``grab()`` succeeding but ``retrieve()`` failing is a skippable frame.
+        Distinguishes end-of-video from a recoverable failure:
+
+        - ``grab()`` succeeds and ``retrieve()`` fails → skippable decode error.
+        - ``grab()`` fails while ``CAP_PROP_POS_FRAMES`` is still before a
+          known ``CAP_PROP_FRAME_COUNT`` → skippable grab/decode error; the
+          capture is advanced so the next ``read()`` can reach later frames.
+        - ``grab()`` fails with no remaining frames (or an unknown/unreliable
+          frame count) → ``(False, None)`` EOF.
 
         Returns:
             ``(True, frame)`` on a successful decode.
             ``(False, None)`` at natural end-of-video.
             ``(False, sentinel)`` when one frame could not be decoded.
         """
+        pos_before = float(self._capture.get(cv2.CAP_PROP_POS_FRAMES))
         grabbed = self._capture.grab()
         if not grabbed:
-            return False, None
+            if self._is_eof_after_failed_grab(pos_before):
+                return False, None
+            self._advance_after_failed_grab(pos_before)
+            return False, self._DECODE_FAILURE_FRAME
 
         retrieved, frame = self._capture.retrieve()
         if not retrieved or frame is None:
             return False, self._DECODE_FAILURE_FRAME
 
         return True, frame
+
+    def _reported_frame_count(self) -> float:
+        return float(self._capture.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    def _reported_position(self) -> float:
+        return float(self._capture.get(cv2.CAP_PROP_POS_FRAMES))
+
+    @staticmethod
+    def _has_known_remaining_frames(pos: float, total: float) -> bool:
+        """True when the container reports frames after *pos*."""
+        return np.isfinite(total) and total > 0 and np.isfinite(pos) and pos < total
+
+    def _is_eof_after_failed_grab(self, pos_before: float) -> bool:
+        """Return True when a failed ``grab()`` should terminate the stream.
+
+        ``grab() == False`` is definitive EOF only when the container does not
+        report later frames.  A known ``FRAME_COUNT`` still ahead of the
+        current position means this slot failed and later frames may exist.
+        """
+        total = self._reported_frame_count()
+        pos_after = self._reported_position()
+        pos = pos_after if np.isfinite(pos_after) else pos_before
+        remaining = OpenCvFrameSource._has_known_remaining_frames(
+            pos, total
+        ) or OpenCvFrameSource._has_known_remaining_frames(pos_before, total)
+        return not remaining
+
+    def _advance_after_failed_grab(self, pos_before: float) -> None:
+        """Move past a failed grab so the next read is not stuck on this slot."""
+        pos_after = self._reported_position()
+        if not np.isfinite(pos_before):
+            return
+        if np.isfinite(pos_after) and pos_after > pos_before:
+            return
+        self._capture.set(cv2.CAP_PROP_POS_FRAMES, int(pos_before) + 1)
 
     def get_fps(self) -> float:
         """Return the video frame rate in frames per second.

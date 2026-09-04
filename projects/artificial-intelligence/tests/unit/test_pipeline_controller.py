@@ -323,6 +323,56 @@ def test_concrete_source_skips_decode_failure_then_counts_eof(
     assert any("decode failure" in r.message.lower() for r in caplog.records)
 
 
+def test_concrete_source_grab_false_mid_stream_does_not_stop_before_later_frames(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """grab() False with remaining FRAME_COUNT must skip, then process later frames."""
+    frame_a = np.zeros((480, 640, 3), dtype=np.uint8)
+    frame_b = np.ones((480, 640, 3), dtype=np.uint8)
+    state = {"pos": 0.0}
+    grab_results = iter([True, False, True, False])
+
+    def grab() -> bool:
+        ok = next(grab_results)
+        if ok:
+            state["pos"] += 1.0
+        return ok
+
+    def cap_get(prop: int) -> float:
+        return {
+            cv2.CAP_PROP_FPS: 30.0,
+            cv2.CAP_PROP_FRAME_WIDTH: 640.0,
+            cv2.CAP_PROP_FRAME_HEIGHT: 480.0,
+            cv2.CAP_PROP_FRAME_COUNT: 3.0,
+            cv2.CAP_PROP_POS_FRAMES: state["pos"],
+        }.get(prop, 0.0)
+
+    def cap_set(prop: int, value: float) -> bool:
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            state["pos"] = float(value)
+        return True
+
+    with patch.object(OpenCvFrameSource, "__init__", lambda self, *args, **kwargs: None):
+        source = OpenCvFrameSource()
+    capture = MagicMock()
+    capture.grab.side_effect = grab
+    capture.get.side_effect = cap_get
+    capture.set.side_effect = cap_set
+    capture.retrieve.side_effect = [(True, frame_a), (True, frame_b)]
+    source._capture = capture
+
+    controller, mocks = _make_controller(frames=[])
+    controller._frame_source = source  # noqa: SLF001
+
+    with caplog.at_level(logging.WARNING):
+        controller.run()
+
+    assert controller.stats.frames_processed == 2
+    assert controller.stats.frames_skipped == 1
+    assert mocks["detector"].predict.call_count == 2
+    assert any("decode failure" in r.message.lower() for r in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # cleanup() always called via finally
 # ---------------------------------------------------------------------------
