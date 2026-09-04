@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,9 +63,36 @@ class AnnotationEvent:
     video_name: str
 
 
+def is_invalid_fps(fps: float) -> bool:
+    """Return True when *fps* cannot be used for timestamps or wait delays.
+
+    Zero, negative, NaN, and ±infinity are all invalid.  ``NaN <= 0`` is
+    False, so a ``fps <= 0`` check alone would let non-finite metadata
+    through to ``round(1000 / fps)``.
+    """
+    return not math.isfinite(fps) or fps <= 0
+
+
+def resolve_annotation_fps(raw_fps: float) -> float:
+    """Return a usable playback FPS, falling back when container metadata is invalid."""
+    if is_invalid_fps(raw_fps):
+        return DEFAULT_FALLBACK_FPS
+    return float(raw_fps)
+
+
+def annotation_wait_delay_ms(fps: float, *, playing: bool) -> int:
+    """Return the ``cv2.waitKeyEx`` delay used by the annotation playback loop.
+
+    Callers must pass a resolved, valid FPS (see :func:`resolve_annotation_fps`).
+    """
+    if not playing:
+        return 0
+    return max(1, round(1000 / fps))
+
+
 def calculate_timestamp(frame_idx: int, fps: float) -> float:
     """Calculate elapsed time from a zero-based frame index."""
-    if fps <= 0:
+    if is_invalid_fps(fps):
         return 0.0
 
     return round(frame_idx / fps, 6)
@@ -194,15 +222,14 @@ def run_annotation(
     if not capture.isOpened():
         raise RuntimeError(f"Could not open video: {video_path}")
 
-    fps = float(capture.get(cv2.CAP_PROP_FPS))
-
-    if fps <= 0:
+    raw_fps = float(capture.get(cv2.CAP_PROP_FPS))
+    if is_invalid_fps(raw_fps):
         logger.warning(
             "Invalid or zero FPS (%s) reported by video container. Falling back to default: %.1f FPS",
-            fps,
+            raw_fps,
             DEFAULT_FALLBACK_FPS,
         )
-        fps = DEFAULT_FALLBACK_FPS
+    fps = resolve_annotation_fps(raw_fps)
 
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     video_name = video_path.name
@@ -235,7 +262,7 @@ def run_annotation(
             )
             cv2.imshow(window_name, displayed)
 
-            delay = max(1, round(1000 / fps)) if playing else 0
+            delay = annotation_wait_delay_ms(fps, playing=playing)
             key = cv2.waitKeyEx(delay)
 
             if key == -1:
