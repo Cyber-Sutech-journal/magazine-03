@@ -1,0 +1,18 @@
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# TLS private keys
+*.key
+key.pem
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+.env
+.venv/
+venv/

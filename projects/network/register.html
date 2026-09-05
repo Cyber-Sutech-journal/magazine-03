@@ -1,0 +1,15 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CyberSutech | ثبت‌نام</title><link rel="stylesheet" href="/style.css"></head><body>
+<header class="nav"><div class="container" style="display:flex;justify-content:space-between;align-items:center">
+<a class="brand" href="/"><img src="/assets/cybersutech-logo.png" alt="CyberSutech"><img class="uni" src="/assets/university-logo.jpg" alt="دانشگاه صنعتی شیراز"></a><a class="back" href="/">صفحه اصلی</a></div></header>
+<main class="auth-wrap"><section class="auth-card"><div class="eyebrow">JOIN THE LAB</div><h1>ثبت‌نام</h1>
+<p>یک حساب برای ورود به محیط آزمایشی بسازید.</p><div id="error" class="error"></div>
+<form method="POST" action="/register"><div class="form-group"><label for="username">نام کاربری</label><input id="username" name="username" type="text" placeholder="demo-user" autocomplete="username" required></div>
+<div class="form-group"><label for="email">ایمیل</label><input id="email" name="email" type="email" placeholder="demo@example.com" autocomplete="email" required></div>
+<div class="form-group"><label for="password">رمز عبور</label><input id="password" name="password" type="password" placeholder="demo-pass" autocomplete="new-password" required></div>
+<button class="btn btn-primary" type="submit">ساخت حساب و ورود</button></form>
+<a class="back" href="/login">قبلاً ثبت‌نام کرده‌اید؟ ورود</a></section></main>
+<script>
+const e=new URLSearchParams(location.search).get("error"),box=document.getElementById("error");
+if(e){box.style.display="block";box.textContent=e==="exists"?"این نام کاربری یا ایمیل قبلاً ثبت شده است.":e==="missing"?"لطفاً همه فیلدها را کامل کنید.":"اطلاعات واردشده معتبر نیست."}
+</script></body></html>

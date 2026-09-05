@@ -1,0 +1,14 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CyberSutech | داشبورد</title><link rel="stylesheet" href="/style.css"></head><body>
+<header class="nav"><div class="container" style="display:flex;justify-content:space-between;align-items:center">
+<a class="brand" href="/"><img src="/assets/cybersutech-logo.png" alt="CyberSutech"><img class="uni" src="/assets/university-logo.jpg" alt="دانشگاه صنعتی شیراز"></a>
+<a class="btn btn-secondary" href="/">صفحه اصلی</a></div></header>
+<main class="dashboard"><div class="container"><div class="dash-head"><div><div class="eyebrow">CYBERSUTECH DASHBOARD</div>
+<h1>خوش آمدید <span id="user">👋</span></h1><p>ورود شما با موفقیت انجام شد.</p></div><span class="status">● Demo session</span></div>
+<div class="topics" style="margin-top:25px"><article class="topic"><div class="icon">✦</div><h3>AI Lab</h3><p>هوش مصنوعی و مدل‌های جدید</p></article>
+<article class="topic"><div class="icon">◈</div><h3>Hardware Lab</h3><p>سخت‌افزار و تجهیزات</p></article>
+<article class="topic"><div class="icon">⌘</div><h3>Software Lab</h3><p>نرم‌افزار و توسعه</p></article>
+<article class="topic"><div class="icon">⌁</div><h3>Network Lab</h3><p>شبکه و زیرساخت</p></article></div></section></div></main>
+<script>
+fetch("/api/me").then(r=>r.json()).then(d=>{if(d.authenticated)document.getElementById("user").textContent=d.username+" 👋"}).catch(()=>{});
+</script></body></html>
